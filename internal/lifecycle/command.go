@@ -12,10 +12,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"pkt.systems/lingon/internal/clock"
 )
 
 type command struct {
 	Dir, Name string
+	Label     string
 	Args      []string
 	Env       map[string]string
 	Unset     []string
@@ -170,7 +173,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer log.Close()
 	fmt.Fprintf(os.Stderr, "Lifecycle log: %s\n", log.Name())
-	w := workflow{root: root, work: work, r: processRunner{log: log}}
+	w := workflow{root: root, work: work, r: timedRunner{next: processRunner{log: log}, clock: clock.New(), log: log, progress: os.Stderr}}
 	return w.run(ctx, opts)
 }
 

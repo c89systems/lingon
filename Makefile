@@ -43,7 +43,7 @@ help:
 	@echo "  make install        # install the existing binary; run make build first"
 	@echo "  make prerelease     # serial full proof + six-platform matrix + APK + Podman rehearsal"
 	@echo "  make release VERSION=X.Y.Z RELEASE_MESSAGE='feat(scope): change'"
-	@echo "                      # candidate proof, squash to trunk, lightweight tag, clean final proof/artifacts"
+	@echo "                      # cheap preflight, squash/tag, one complete final proof and artifact build"
 	@echo "  make release-matrix # incremental artifact rehearsal, never sufficient to publish"
 	@echo "  make package-verify # inspect existing receipt, checksums, binary/APK/image metadata"
 	@echo "  make publish        # push verified trunk/tag, publish GitHub assets, push Docker Hub last"

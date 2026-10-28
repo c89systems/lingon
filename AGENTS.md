@@ -154,10 +154,10 @@ instrumentation or end-to-end verification for that exact behavior.
   Linux/Android; other binaries are cross-built and inspected.
 - Commit candidate code/docs and resolve review findings before release. A
   clean candidate must contain current `trunk`, which must match `origin/trunk`.
-- `make release VERSION=X.Y.Z RELEASE_MESSAGE='type(scope): change'` runs the
-  complete candidate gate before squashing to trunk, preserves the source
-  branch, creates a lightweight `vX.Y.Z` tag, then cleans/retests/rebuilds and
-  verifies final artifacts from that exact tagged commit. Select actual release
+- `make release VERSION=X.Y.Z RELEASE_MESSAGE='type(scope): change'` runs cheap
+  candidate preflight checks before squashing to trunk, preserves the source
+  branch, creates a lightweight `vX.Y.Z` tag, then runs the complete proof and
+  artifact matrix once from that exact tagged commit. Select actual release
   versions explicitly; do not treat examples as a version decision.
 - Release gates are stop-only. On failure, report the failing gate and local
   branch/tag/artifact state. Do not fix, amend, reset, retag, retry correctness

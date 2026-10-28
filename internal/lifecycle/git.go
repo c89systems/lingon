@@ -252,10 +252,10 @@ func (w *workflow) release(ctx context.Context, opts Options) error {
 		return fmt.Errorf("candidate must contain current trunk; resolve divergence before release: %w", err)
 	}
 	fmt.Printf("Local release plan: %s -> trunk at %s; %s; 6 CLI archives, signed APK, checksums, Linux amd64/arm64 container. Publication is separate.\n", branch, base, tag)
-	if err := w.prerelease(ctx); err != nil {
+	if err := w.preflight(ctx, candidate); err != nil {
 		return err
 	}
-	// Recheck every pinned input after the expensive candidate rehearsal.
+	// Pin inputs across preflight before changing the local branch/tag state.
 	if err := w.unchanged(ctx, candidate); err != nil {
 		return err
 	}
@@ -263,13 +263,13 @@ func (w *workflow) release(ctx context.Context, opts Options) error {
 		return err
 	}
 	if current, err := w.git(ctx, "rev-parse", "trunk"); err != nil || current != base {
-		return fmt.Errorf("trunk changed during rehearsal")
+		return fmt.Errorf("trunk changed during preflight")
 	}
 	if current, err := w.remoteRef(ctx, "refs/heads/trunk"); err != nil || current != base {
-		return fmt.Errorf("remote trunk changed during rehearsal")
+		return fmt.Errorf("remote trunk changed during preflight")
 	}
 	if current, err := w.remoteRef(ctx, "refs/tags/"+tag); err != nil || current != "" {
-		return fmt.Errorf("release tag appeared during rehearsal")
+		return fmt.Errorf("release tag appeared during preflight")
 	}
 	if branch != "trunk" {
 		tree, err := w.git(ctx, "rev-parse", "HEAD^{tree}")
@@ -286,7 +286,7 @@ func (w *workflow) release(ctx context.Context, opts Options) error {
 			return err
 		}
 		if actual, err := w.git(ctx, "rev-parse", "HEAD^{tree}"); err != nil || actual != tree {
-			return fmt.Errorf("squash tree differs from verified candidate; stop before tagging")
+			return fmt.Errorf("squash tree differs from candidate; stop before tagging")
 		}
 	}
 	releaseCommit, err := w.git(ctx, "rev-parse", "HEAD")
