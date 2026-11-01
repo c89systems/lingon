@@ -39,9 +39,10 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	v.SetDefault("terminal.disable_desktop_notifications", lingon.DefaultTerminalDisableDesktopNotifications)
 
 	cmd := &cobra.Command{
-		Use:   "attach [session-id]",
-		Short: "Attach to a Lingon session",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "attach [session-id]",
+		Aliases: []string{"a"},
+		Short:   "Attach to a Lingon session",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			headlessMode, err := cmd.Flags().GetBool("headless")
 			if err != nil {

@@ -292,6 +292,8 @@ Headless local mode notes:
 
 ### Attach
 
+`a` is an alias for `attach`, for example `lingon a -r prod-shell`.
+
 Attach to a session over a TUI client:
 
 ```bash

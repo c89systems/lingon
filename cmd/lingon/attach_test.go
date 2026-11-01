@@ -19,6 +19,27 @@ func TestAttachRestoreFlagAliases(t *testing.T) {
 	}
 }
 
+func TestAttachSubcommandAliasSupportsRestore(t *testing.T) {
+	root := NewRootCommand(lingon.NewLoader())
+	cmd, args, err := root.Find([]string{"a", "-r", "remote-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Name() != "attach" {
+		t.Fatalf("alias resolved to %q", cmd.Name())
+	}
+	if err := cmd.ParseFlags(args); err != nil {
+		t.Fatal(err)
+	}
+	restore, err := cmd.Flags().GetBool("restore")
+	if err != nil || !restore {
+		t.Fatalf("restore: %v %v", restore, err)
+	}
+	if got := cmd.Flags().Args(); len(got) != 1 || got[0] != "remote-session" {
+		t.Fatalf("arguments: %v", got)
+	}
+}
+
 func TestAttachHostnameOnlyFlag(t *testing.T) {
 	loader := lingon.NewLoader()
 	cmd := NewAttachCommand(loader)
