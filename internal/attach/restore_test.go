@@ -16,6 +16,7 @@ import (
 	"pkt.systems/lingon/internal/clock"
 	"pkt.systems/lingon/internal/mvu"
 	"pkt.systems/lingon/internal/protocolpb"
+	"pkt.systems/lingon/internal/terminal"
 )
 
 func TestRestoreRechecksQueuedFramesAtDelivery(t *testing.T) {
@@ -129,12 +130,12 @@ func TestRestoreRequestDeduplicationAndWarning(t *testing.T) {
 	output.Reset()
 	cols = 90
 	c.restoreTerminalLocked(snap)
-	if output.String() != "\x1b[8;30;100t" {
-		t.Fatal("manual resize not corrected")
+	if output.Len() != 0 {
+		t.Fatal("rendering fought manual resize")
 	}
 	c.toggleRestore()
 	clk.Add(time.Second)
-	if output.String() != "\x1b[8;30;100t" {
+	if output.Len() != 0 {
 		t.Fatal("disabled mode emitted resize")
 	}
 }
@@ -158,5 +159,99 @@ func TestRestoreHiddenAndConfirmedRequestsDoNotWarn(t *testing.T) {
 			t.Fatalf("spurious warning: %s", msg)
 		}
 		stop()
+	}
+}
+
+func TestRestoreWindowRequestRunsOnlyOnEntryAndActivation(t *testing.T) {
+	clk := clock.NewMock()
+	var output bytes.Buffer
+	cols, rows := 80, 24
+	c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), TermSize: func() (int, int) { return cols, rows }}
+	stop := c.startEffects(t.Context())
+	defer stop()
+	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
+	cols, rows = 100, 30
+	if err := c.processTerminalResize(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	c.restoreTerminalLocked(mvu.BlankSnapshot(120, 35))
+	if output.Len() != 0 {
+		t.Fatal("ordinary remote frames reissued a window resize")
+	}
+	c.SetStdout(io.Discard)
+	c.SetStdout(&output)
+	c.restoreTerminalLocked(mvu.BlankSnapshot(120, 35))
+	if got := output.String(); got != "\x1b[8;35;120t" {
+		t.Fatalf("activation failed to restore size: %q", got)
+	}
+	cols, rows = 90, 25
+	if err := c.processTerminalResize(t.Context(), false); err == nil {
+		t.Fatal("manual resize did not attempt remote delivery")
+	}
+	output.Reset()
+	clk.Add(time.Second)
+	if msg := c.compositor.Read().ConnectionMessage; strings.Contains(msg, "remote remains") {
+		t.Fatalf("manual resize left stale warning: %q", msg)
+	}
+	if c.restoreManual != (terminal.WindowSize{Cols: 90, Rows: 25}) {
+		t.Fatal("pending manual size lost before acknowledgement")
+	}
+	c.restoreTerminalLocked(mvu.BlankSnapshot(120, 35))
+	if c.restoreManual == (terminal.WindowSize{}) {
+		t.Fatal("stale snapshot acknowledged the manual size")
+	}
+	c.restoreTerminalLocked(mvu.BlankSnapshot(90, 25))
+	if c.restoreManual != (terminal.WindowSize{}) {
+		t.Fatal("remote acknowledgement did not clear pending size")
+	}
+}
+
+func TestRestoreManualResizeDoesNotRememberRejectedViewOnlySize(t *testing.T) {
+	clk := clock.NewMock()
+	var output bytes.Buffer
+	cols, rows := 80, 24
+	c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), viewOnly: true, TermSize: func() (int, int) { return cols, rows }}
+	stop := c.startEffects(t.Context())
+	defer stop()
+	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
+	cols, rows = 90, 25
+	if err := c.processTerminalResize(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if c.restoreManual != (terminal.WindowSize{}) {
+		t.Fatal("read-only camera resize became a pending remote size")
+	}
+	c.SetStdout(io.Discard)
+	c.SetStdout(&output)
+	output.Reset()
+	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
+	if output.String() != "\x1b[8;30;100t" {
+		t.Fatal("read-only resize replaced the actual remote size")
+	}
+}
+
+func TestRestoreClearsPendingManualSizeAfterControlIsDenied(t *testing.T) {
+	clk := clock.NewMock()
+	var output bytes.Buffer
+	cols, rows := 80, 24
+	c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), TermSize: func() (int, int) { return cols, rows }}
+	stop := c.startEffects(t.Context())
+	defer stop()
+	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
+	cols, rows = 90, 25
+	if err := c.processTerminalResize(t.Context(), false); err == nil {
+		t.Fatal("expected pending disconnected delivery")
+	}
+	// A server can reject the resize after it was queued. Its real snapshot
+	// must remain authoritative when this tab is selected again.
+	c.setViewOnly("control not permitted")
+	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
+	c.SetStdout(io.Discard)
+	c.SetStdout(&output)
+	output.Reset()
+	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
+	if output.String() != "\x1b[8;30;100t" {
+		t.Fatalf("rejected size displaced actual remote size: %q", output.String())
 	}
 }

@@ -269,7 +269,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	flags.IntVar(&cols, "cols", 0, "resize local terminal and remote session columns (0 keeps the local width; ignored with --restore)")
 	flags.IntVar(&rows, "rows", 0, "resize local terminal and remote session rows (0 keeps the local height; ignored with --restore)")
 	flags.StringP(geometryFlagName, "g", "", "resize local terminal and remote session to COLSxROWS (overrides --cols/--rows; ignored with --restore)")
-	flags.BoolVarP(&restore, "restore", "r", false, "preserve remote viewport size and resize the local terminal to match (Ctrl+L ! toggles)")
+	flags.BoolVarP(&restore, "restore", "r", false, "restore each session's window size; manual resizing updates that session (Ctrl+L ! toggles)")
 	flags.StringVarP(&endpoint, "endpoint", "e", lingon.DefaultClientEndpoint, "relay endpoint (https/wss base URL; assumes https:// if omitted)")
 	flags.StringVarP(&shareToken, "token", "t", "", "share token for anonymous attach")
 	flags.StringVar(&accessToken, "access-token", "", "access token for authenticated attach")

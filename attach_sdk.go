@@ -29,7 +29,8 @@ type AttachOptions struct {
 	// Cols and Rows request a local and remote viewport; zero dimensions use the
 	// current local size. Restore takes precedence over both dimensions.
 	Cols, Rows int
-	// Restore requests a local terminal window matching the remote viewport.
+	// Restore matches the selected session's viewport on entry/tab switching.
+	// Manual window resizing updates only that remote session.
 	Restore                     bool
 	HostnameOnly                bool
 	Theme                       string

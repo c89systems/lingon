@@ -77,7 +77,7 @@ func waitRestoreHost(t *testing.T, recorder *ptytest.WSRecorder, id string) {
 	}
 }
 
-func TestRestorePreservesRemoteThroughPTYResizeAndToggle(t *testing.T) {
+func TestRestoreAcknowledgesWindowRequestAndAcceptsManualResizePTY(t *testing.T) {
 	for _, multi := range []bool{false, true} {
 		t.Run(fmt.Sprintf("multi=%v", multi), func(t *testing.T) {
 			clk := clock.NewMock()
@@ -102,13 +102,12 @@ func TestRestorePreservesRemoteThroughPTYResizeAndToggle(t *testing.T) {
 			terminal.Send("preserved\r")
 			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("REPLY:preserved SIZE:30 100") })
 			assertNoRestorePropagation(t, recorder)
-			// An arbitrary local window resize must not change the remote PTY.
+			// A manual window resize updates this session instead of restoring over it.
 			terminal.DrainRaw()
 			terminal.Resize(90, 25)
-			waitRestoreRequest(t, terminal, 100, 30)
+			waitGeometrySnapshot(t, recorder, "restore", 90, 25)
 			terminal.Send("still-preserved\r")
-			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("REPLY:still-preserved SIZE:30 100") })
-			assertNoRestorePropagation(t, recorder)
+			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("REPLY:still-preserved SIZE:25 90") })
 			// Toggle off restores the established local-to-remote direction.
 			terminal.Send("\x0c!")
 			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("Restore off") })
@@ -129,12 +128,12 @@ func TestRestorePreservesRemoteThroughPTYResizeAndToggle(t *testing.T) {
 			terminal.Send("normal\r")
 			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("REPLY:normal SIZE:26 88") })
 			terminal.Send("\x0c!")
-			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("remote size preserved") })
+			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("follow session size") })
 			terminal.DrainRaw()
 			terminal.Resize(75, 20)
-			waitRestoreRequest(t, terminal, 88, 26)
+			waitGeometrySnapshot(t, recorder, "restore", 75, 20)
 			terminal.Send("restored-again\r")
-			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("REPLY:restored-again SIZE:26 88") })
+			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return s.Contains("REPLY:restored-again SIZE:20 75") })
 		})
 	}
 }

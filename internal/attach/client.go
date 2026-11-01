@@ -109,7 +109,10 @@ type Client struct {
 	mu                        sync.RWMutex
 	restoreMode               *atomic.Bool
 	geometry                  *clientGeometry
-	restoreRequest            restoreRequest       // protected by renderMu
+	restoreRequest            restoreRequest // protected by renderMu
+	restoreInitialized        bool
+	restoreLocal              terminal.WindowSize
+	restoreManual             terminal.WindowSize
 	searchBaseline            *protocolpb.Snapshot // protected by renderMu
 	lastSnapshot              *protocolpb.Snapshot
 	lastSeq                   uint64
@@ -298,6 +301,11 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 	if cols == 0 || rows == 0 {
 		cols, rows = config.DefaultTerminalCols, config.DefaultTerminalRows
 	}
+	c.renderMu.Lock()
+	if c.restoreLocal == (terminal.WindowSize{}) {
+		c.restoreLocal = terminal.WindowSize{Cols: cols, Rows: rows}
+	}
+	c.renderMu.Unlock()
 	if c.geometry == nil && (c.Cols != 0 || c.Rows != 0) {
 		var err error
 		c.geometry, err = newClientGeometry(c.Cols, c.Rows, cols, rows, c.Restore)
@@ -396,6 +404,9 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 		return err
 	}
 	if err := c.applyGeometry(ctx); err != nil {
+		return err
+	}
+	if err := c.applyRestoreManualResize(ctx); err != nil {
 		return err
 	}
 
@@ -707,8 +718,14 @@ func (c *Client) markReady() {
 // SetStdout overrides the writer used for rendering snapshots.
 func (c *Client) SetStdout(w io.Writer) {
 	c.renderMu.Lock()
+	changedVisibility := (c.stdoutWriter() == io.Discard) != (w == io.Discard)
 	c.stdout = w
-	c.restoreRequest = restoreRequest{}
+	if changedVisibility {
+		c.restoreRequest = restoreRequest{}
+		c.restoreInitialized = false
+		cols, rows := c.terminalSize()
+		c.restoreLocal = terminal.WindowSize{Cols: cols, Rows: rows}
+	}
 	c.renderMu.Unlock()
 }
 
@@ -2191,7 +2208,7 @@ func (c *Client) writeFrame(ctx context.Context, ws *websocket.Conn, frame *prot
 	// Recheck at delivery: a normal-mode resize/resync may have waited behind
 	// earlier input while the user enabled restoration.
 	if c.restoreEnabled() {
-		if frame.GetResize() != nil {
+		if resize := frame.GetResize(); resize != nil && !resize.Explicit {
 			return nil
 		}
 		if frame.GetHello() != nil {
@@ -2333,7 +2350,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return true
 				case control.ActionToggleRestore:
 					if c.toggleRestore() {
-						c.showInfoStatus("Restore: remote size preserved")
+						c.showInfoStatus("Restore: follow session size")
 					} else {
 						c.showInfoStatus("Restore off")
 						if !c.DisableResizePropagation {
@@ -2401,6 +2418,10 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 						c.showInfoStatus("offline toggle is host local-only")
 					}
 				case control.ActionResizeHeadless:
+					if c.restoreEnabled() {
+						_ = c.processTerminalResize(ctx, false)
+						return true
+					}
 					if c.DisableResizePropagation {
 						c.showInfoStatus("resize is headless-only")
 						return true
@@ -2713,17 +2734,9 @@ func (c *Client) handleResize(ctx context.Context, ws *websocket.Conn) {
 		case <-ctx.Done():
 			return
 		case <-ch:
-			cols, rows := c.terminalSize()
-			c.RenderCurrentFull()
-			if !c.restoreEnabled() && !c.DisableResizePropagation && c.isController() {
-				_ = c.SendResize(ctx, cols, rows)
-			}
+			_ = c.processTerminalResize(ctx, !c.DisableResizePropagation && c.isController())
 		case <-resizeEvents:
-			cols, rows := c.terminalSize()
-			c.RenderCurrentFull()
-			if !c.restoreEnabled() && !c.DisableResizePropagation && c.isController() {
-				_ = c.SendResize(ctx, cols, rows)
-			}
+			_ = c.processTerminalResize(ctx, !c.DisableResizePropagation && c.isController())
 		case <-c.controlCh:
 			if c.restoreEnabled() || c.DisableResizePropagation || !c.isController() || ws == nil {
 				continue

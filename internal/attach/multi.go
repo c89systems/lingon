@@ -940,6 +940,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				view.pendingOps = nil
 			}
 			mu.Unlock()
+			_ = client.applyRestoreManualResize(cctx)
 			for {
 				for _, op := range pending {
 					if len(op.input) > 0 {
@@ -2013,14 +2014,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		if view == nil || view.client == nil {
 			return
 		}
-		cols, rows := view.client.terminalSize()
-		if cols == 0 || rows == 0 {
-			cols, rows = config.DefaultTerminalCols, config.DefaultTerminalRows
-		}
-		view.client.RenderCurrentFull()
-		if sessionAllowsResize(session) {
-			_ = view.client.SendResize(ctx, cols, rows)
-		}
+		_ = view.client.processTerminalResize(ctx, sessionAllowsResize(session))
 	}
 	drainPendingResize := func() {
 		for {
@@ -2217,7 +2211,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				case control.ActionToggleRestore:
 					if client != nil {
 						if client.toggleRestore() {
-							showConnected("Restore: remote size preserved", 2*time.Second)
+							showConnected("Restore: follow session size", 2*time.Second)
 						} else {
 							showConnected("Restore off", 2*time.Second)
 							processResizeEvent()
@@ -2288,6 +2282,10 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					}
 				case control.ActionResizeHeadless:
 					targetView, targetClient, _, _, _ := activeViewSnapshot()
+					if targetClient != nil && targetClient.restoreEnabled() {
+						_ = targetClient.processTerminalResize(ctx, false)
+						return true
+					}
 					mu.Lock()
 					var targetSession SessionInfo
 					ok := false

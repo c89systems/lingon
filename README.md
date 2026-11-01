@@ -351,13 +351,16 @@ Both ends must run a version supporting explicit geometry.
 `lingon -g 100x50`, `--cols` and `--rows` likewise request the interactive host
 window size. Detached headless startup sets only its PTY size.
 
-`lingon attach -r [session-id]` (or `--restore`) preserves the remote viewport
-and requests a matching local terminal window. It works with relay sessions,
+`lingon attach -r [session-id]` (or `--restore`) requests a local terminal window
+matching the selected session's viewport. It works with relay sessions,
 share tokens and local `attach -x`. Press `Ctrl+l !` to toggle the mode while
-attached. Restoration follows tab switches and remote viewport changes; local
-window changes do not resize the remote session while it is enabled. Turning
-it off resumes the usual resize policy (remote headless sessions follow the
-local viewport; interactive hosts retain their own size).
+attached. Restoration runs on entry and when switching tabs. Manually resizing
+your window updates only the selected remote session, including interactive
+hosts; switching away and back restores that session's new size. Other sessions
+keep their own dimensions. Acknowledging Lingon's window request does not resize
+the remote session. Turning restoration off resumes the usual resize policy:
+remote headless sessions follow the local viewport; interactive hosts retain
+their own size.
 `--restore` takes precedence over geometry, `--cols` and `--rows`, ignoring
 them entirely. After toggling restoration off, an attachment started with
 explicit geometry can again resize interactive remote hosts.
@@ -412,7 +415,7 @@ Attach options (selection):
 - `-t, --token` share token for anonymous attach
 - `--access-token` access token for authenticated attach
 - `--request-control` request controller lease on connect
-- `-r, --restore` preserve remote dimensions and request a matching local terminal window
+- `-r, --restore` restore each selected session's window size; manual resizing updates that session
 - `-g, --geometry COLSxROWS` resize the local terminal and remote session; ignored with `--restore`
 - `--cols`, `--rows` size individual dimensions (`0` uses local size); ignored with `--restore`
 - `--pick` interactively pick a session
