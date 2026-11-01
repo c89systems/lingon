@@ -157,6 +157,9 @@ type Runner struct {
 	credentialMu sync.RWMutex
 	currentToken string
 
+	windowSizes  map[string]*terminal.WindowSizeRequest // protected by geometryMu
+	windowResize chan struct{}
+
 	management  *sessionmanage.Manager
 	opts        Options
 	geometryMu  sync.RWMutex
@@ -414,6 +417,22 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 	}
 
 	var wg sync.WaitGroup
+	r.windowResize = make(chan struct{}, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-sigCtx.Done():
+				return
+			case <-r.windowResize:
+				id, local := r.activeSession()
+				if local {
+					r.requestPendingWindow(sigCtx, id)
+				}
+			}
+		}
+	}()
 	var gate *netgate.Gate
 	debugRemoteInput := os.Getenv("LINGON_DEBUG_INPUT") == "1"
 
@@ -488,6 +507,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 			},
 		})
 	}
+	r.requestPendingWindow(sigCtx, r.opts.SessionID)
 	if err := r.startInitialLocalSession(sigCtx, tokenRefresher, gate, stdout, stdin, debugRemoteInput); err != nil {
 		return err
 	}
@@ -864,7 +884,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 				if cols <= 0 || rows <= 0 {
 					continue
 				}
-				r.ResizeActive(cols, rows)
+				r.ResizeActiveIfChanged(cols, rows)
 				activeID, _ := r.activeSession()
 				if r.scrollbackActiveFor(activeID) {
 					r.renderScrollback(stdout, stdin)
@@ -876,7 +896,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 				if cols <= 0 || rows <= 0 {
 					continue
 				}
-				r.ResizeActive(cols, rows)
+				r.ResizeActiveIfChanged(cols, rows)
 				activeID, _ := r.activeSession()
 				if r.scrollbackActiveFor(activeID) {
 					r.renderScrollback(stdout, stdin)
@@ -2050,9 +2070,23 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 		pub.OnCommand = func(kind protocolpb.CommandKind) {
 			r.HandleSessionCommand(session.ctx, session.ID(), kind)
 		}
-		pub.OnResize = func(cols, rows int) {
-			if session == nil || !session.AllowRemoteResize() {
+		pub.OnResize = func(request *protocolpb.Resize) {
+			if session == nil || (!request.Explicit && !session.AllowRemoteResize()) {
 				return
+			}
+			cols, rows := int(request.Cols), int(request.Rows)
+			if cols <= 0 || rows <= 0 {
+				return
+			}
+			if request.Explicit && terminal.IsTerminal(r.stdout()) {
+				r.storeWindowRequest(session.ID(), terminal.WindowSize{Cols: cols, Rows: rows})
+				if id, local := r.activeSession(); local && id == session.ID() {
+					r.setTerminalGeometry(cols, rows)
+					select {
+					case r.windowResize <- struct{}{}:
+					default:
+					}
+				}
 			}
 			r.resizeLocalSession(session, cols, rows)
 		}
@@ -2403,6 +2437,9 @@ func (r *Runner) removeLocalSession(id string, stdout, stdin *os.File) {
 	}
 	remaining := len(r.localOrder)
 	r.localMu.Unlock()
+	r.geometryMu.Lock()
+	delete(r.windowSizes, id)
+	r.geometryMu.Unlock()
 	r.inputTraceMu.Lock()
 	if r.inputTraceEnter != nil {
 		delete(r.inputTraceEnter, id)
@@ -3166,6 +3203,12 @@ func (r *Runner) activateLocalSession(sessionID string, stdout, stdin *os.File) 
 		r.remoteSessions.Hide(activeID)
 	}
 	r.setActiveSession(sessionID, true)
+	if request := r.windowRequest(sessionID); request != nil {
+		if size := request.Pending(); size.Cols > 0 && size.Rows > 0 {
+			r.setTerminalGeometry(size.Cols, size.Rows)
+		}
+	}
+	r.requestPendingWindow(r.runCtx, sessionID)
 	if local.Offline() {
 		r.runtime().ApplyAction(mvu.StatusAction{Input: mvu.StatusInput{Kind: mvu.StatusClear}})
 	}

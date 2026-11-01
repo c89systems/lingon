@@ -181,3 +181,36 @@ func geometryTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().StringP(geometryFlagName, "g", "", "")
 	return cmd
 }
+
+func TestAttachGeometryFlagsAndPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		cols, rows int
+		invalid    bool
+	}{
+		{[]string{"-g", "100x50"}, 100, 50, false},
+		{[]string{"--geometry", "100x50", "--cols", "9", "--rows", "8"}, 100, 50, false},
+		{[]string{"--cols", "100"}, 100, 0, false},
+		{[]string{"--rows", "50"}, 0, 50, false},
+		{[]string{"--cols", "100", "--rows", "50"}, 100, 50, false},
+		{[]string{"-r", "-g", "bad", "--cols", "-1", "--rows", "-1"}, 0, 0, false},
+		{[]string{"-g", "bad"}, 0, 0, true},
+		{[]string{"--cols", "-1"}, 0, 0, true},
+	} {
+		root := NewRootCommand(lingon.NewLoader())
+		cmd, args, err := root.Find(append([]string{"a"}, tc.args...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = cmd.ParseFlags(args); err != nil {
+			t.Fatal(err)
+		}
+		cols, _ := cmd.Flags().GetInt("cols")
+		rows, _ := cmd.Flags().GetInt("rows")
+		restore, _ := cmd.Flags().GetBool("restore")
+		cols, rows, err = resolveAttachSize(cmd, cols, rows, restore)
+		if (err != nil) != tc.invalid || cols != tc.cols || rows != tc.rows {
+			t.Fatalf("%v: %dx%d %v", tc.args, cols, rows, err)
+		}
+	}
+}

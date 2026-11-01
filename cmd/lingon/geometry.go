@@ -12,6 +12,20 @@ import (
 
 const geometryFlagName = "geometry"
 
+func resolveAttachSize(cmd *cobra.Command, cols, rows int, restore bool) (int, int, error) {
+	if restore {
+		return 0, 0, nil
+	}
+	cols, rows, err := resolveRootHostSize(cmd, cols, rows)
+	if err != nil {
+		return 0, 0, err
+	}
+	if cols < 0 || rows < 0 {
+		return 0, 0, fmt.Errorf("columns and rows must be zero or greater")
+	}
+	return cols, rows, nil
+}
+
 func parseGeometry(raw string) (int, int, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {

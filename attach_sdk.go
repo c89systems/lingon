@@ -26,6 +26,9 @@ type AttachOptions struct {
 	AccessToken       string
 	ShareToken        string
 	RequestControl    bool
+	// Cols and Rows request a local and remote viewport; zero dimensions use the
+	// current local size. Restore takes precedence over both dimensions.
+	Cols, Rows int
 	// Restore requests a local terminal window matching the remote viewport.
 	Restore                     bool
 	HostnameOnly                bool
@@ -51,6 +54,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 			_ = stopWatcher()
 		}()
 		client := &attach.MultiClient{
+			Cols: opts.Cols, Rows: opts.Rows,
 			Restore:                     opts.Restore,
 			Endpoint:                    opts.Endpoint,
 			SessionID:                   opts.SessionID,
@@ -70,6 +74,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 	}
 	if opts.UnixSocket != "" {
 		client := &attach.Client{
+			Cols: opts.Cols, Rows: opts.Rows,
 			Restore:                     opts.Restore,
 			Endpoint:                    opts.Endpoint,
 			SessionID:                   opts.SessionID,
@@ -87,6 +92,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 	}
 	if opts.ShareToken != "" {
 		client := &attach.Client{
+			Cols: opts.Cols, Rows: opts.Rows,
 			Restore:                     opts.Restore,
 			Endpoint:                    opts.Endpoint,
 			SessionID:                   opts.SessionID,
@@ -105,6 +111,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 		return client.Run(ctx)
 	}
 	client := &attach.MultiClient{
+		Cols: opts.Cols, Rows: opts.Rows,
 		Restore:                     opts.Restore,
 		Endpoint:                    opts.Endpoint,
 		SessionID:                   opts.SessionID,

@@ -3,8 +3,10 @@ package session
 import (
 	"context"
 	"strings"
+	"time"
 
 	"pkt.systems/lingon/internal/config"
+	"pkt.systems/lingon/internal/terminal"
 )
 
 // terminalGeometry snapshots the pair shared by resize and terminal creation.
@@ -23,6 +25,7 @@ func (r *Runner) setTerminalGeometry(cols, rows int) {
 
 func (r *Runner) initializeTerminalGeometry() {
 	cols, rows := r.terminalGeometry()
+	explicit := cols > 0 || rows > 0
 	if cols <= 0 || rows <= 0 {
 		detectedCols, detectedRows := termSizeAny(r.stdout(), r.stdin())
 		if detectedCols > 0 && detectedRows > 0 {
@@ -41,6 +44,65 @@ func (r *Runner) initializeTerminalGeometry() {
 		rows = config.DefaultTerminalRows
 	}
 	r.setTerminalGeometry(cols, rows)
+	if explicit && terminal.IsTerminal(r.stdout()) {
+		r.storeWindowRequest(r.opts.SessionID, terminal.WindowSize{Cols: cols, Rows: rows})
+	}
+}
+
+func (r *Runner) storeWindowRequest(id string, size terminal.WindowSize) {
+	r.geometryMu.Lock()
+	if r.windowSizes == nil {
+		r.windowSizes = make(map[string]*terminal.WindowSizeRequest)
+	}
+	request := r.windowSizes[id]
+	if request == nil {
+		request = &terminal.WindowSizeRequest{}
+		r.windowSizes[id] = request
+	}
+	r.geometryMu.Unlock()
+	request.Set(size)
+}
+
+func (r *Runner) windowRequest(id string) *terminal.WindowSizeRequest {
+	r.geometryMu.RLock()
+	defer r.geometryMu.RUnlock()
+	return r.windowSizes[id]
+}
+
+func (r *Runner) requestPendingWindow(ctx context.Context, id string) {
+	request := r.windowRequest(id)
+	if request == nil {
+		return
+	}
+	size := request.Pending()
+	if size.Cols <= 0 || size.Rows <= 0 {
+		return
+	}
+	cols, rows := termSizeAny(r.stdout(), r.stdin())
+	request.Observe(terminal.WindowSize{Cols: cols, Rows: rows})
+	if cols == size.Cols && rows == size.Rows {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.stdoutMu.Lock()
+	err := writeAll(ctx, r.stdout(), terminal.WindowResizeSequence(size), r.clock)
+	r.stdoutMu.Unlock()
+	if err != nil || r.effects == nil {
+		return
+	}
+	r.effects.Schedule(ctx, "window-size", time.Second, func() {
+		active, _ := r.activeSession()
+		if active != id || request.Pending() != size {
+			return
+		}
+		cols, rows := termSizeAny(r.stdout(), r.stdin())
+		if cols == size.Cols && rows == size.Rows {
+			return
+		}
+		r.showErrorStatus("Terminal did not accept requested geometry", r.stdout(), 5*time.Second)
+	})
 }
 
 // ResizeActive applies a size update to the current active session.
@@ -75,6 +137,10 @@ func (r *Runner) ResizeActiveIfChanged(cols, rows int) bool {
 	}
 	activeID, activeLocal := r.activeSession()
 	if activeLocal {
+		if request := r.windowRequest(activeID); request != nil {
+			size := request.Observe(terminal.WindowSize{Cols: cols, Rows: rows})
+			cols, rows = size.Cols, size.Rows
+		}
 		targetID := strings.TrimSpace(activeID)
 		if targetID == "" {
 			targetID = r.firstLocalID()

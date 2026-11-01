@@ -58,7 +58,7 @@ type Publisher struct {
 	// It may invoke reply asynchronously after delivery; Reset cancels pending work.
 	OnClipboard            func(context.Context, *protocolpb.Clipboard, func(*protocolpb.Clipboard))
 	OnClipboardReset       func()
-	OnResize               func(cols, rows int)
+	OnResize               func(*protocolpb.Resize)
 	OnCommand              func(kind protocolpb.CommandKind)
 	OnManagement           func(context.Context, *protocolpb.SessionManagement) *protocolpb.SessionManagement
 	management             chan *protocolpb.SessionManagement
@@ -641,7 +641,7 @@ func (p *Publisher) readWS(ctx context.Context, ws *websocket.Conn) error {
 			continue
 		}
 		if resize := frame.GetResize(); resize != nil && p.OnResize != nil {
-			p.OnResize(int(resize.Cols), int(resize.Rows))
+			p.OnResize(resize)
 			continue
 		}
 		if welcome := frame.GetWelcome(); welcome != nil {

@@ -61,7 +61,9 @@ type Client struct {
 	ShareToken     string
 	RequestControl bool
 	// Restore requests that the local terminal follow remote viewport dimensions.
-	Restore      bool
+	Restore bool
+	// Cols and Rows explicitly size the local window and remote viewport. Restore takes precedence.
+	Cols, Rows   int
 	HostnameOnly bool
 	TLSDir       string
 	Insecure     bool
@@ -106,6 +108,7 @@ type Client struct {
 
 	mu                        sync.RWMutex
 	restoreMode               *atomic.Bool
+	geometry                  *clientGeometry
 	restoreRequest            restoreRequest       // protected by renderMu
 	searchBaseline            *protocolpb.Snapshot // protected by renderMu
 	lastSnapshot              *protocolpb.Snapshot
@@ -295,6 +298,13 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 	if cols == 0 || rows == 0 {
 		cols, rows = config.DefaultTerminalCols, config.DefaultTerminalRows
 	}
+	if c.geometry == nil && (c.Cols != 0 || c.Rows != 0) {
+		var err error
+		c.geometry, err = newClientGeometry(c.Cols, c.Rows, cols, rows, c.Restore)
+		if err != nil {
+			return err
+		}
+	}
 
 	dialOptions := &websocket.DialOptions{HTTPClient: &http.Client{}}
 	if c.UnixSocket != "" {
@@ -383,6 +393,9 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 		c.Logger.Debug("attach.client.hello", "session", c.SessionID, "client", c.ClientID, "last_seq", lastSeq)
 	}
 	if err := c.writeFrame(ctx, ws, hello); err != nil {
+		return err
+	}
+	if err := c.applyGeometry(ctx); err != nil {
 		return err
 	}
 
@@ -2137,6 +2150,7 @@ func (c *Client) helloLastSeq() uint64 {
 }
 
 func (c *Client) buildHelloFrame(cols, rows int) *protocolpb.Frame {
+	cols, rows = c.geometrySize(cols, rows)
 	if c.restoreEnabled() {
 		cols, rows = 0, 0
 	}
@@ -2184,6 +2198,13 @@ func (c *Client) writeFrame(ctx context.Context, ws *websocket.Conn, frame *prot
 			frame = proto.Clone(frame).(*protocolpb.Frame)
 			frame.GetHello().Cols, frame.GetHello().Rows = 0, 0
 		}
+	}
+	if !c.restoreEnabled() && c.geometry != nil && frame.GetResize() != nil {
+		cols, rows := c.terminalSize()
+		cols, rows = c.geometrySize(cols, rows)
+		frame = proto.Clone(frame).(*protocolpb.Frame)
+		frame.GetResize().Cols, frame.GetResize().Rows = uint32(cols), uint32(rows)
+		frame.GetResize().Explicit = true
 	}
 	if err := writeFrame(ctx, ws, frame); err != nil {
 		return err
@@ -2694,23 +2715,20 @@ func (c *Client) handleResize(ctx context.Context, ws *websocket.Conn) {
 			cols, rows := c.terminalSize()
 			c.RenderCurrentFull()
 			if !c.restoreEnabled() && !c.DisableResizePropagation && c.isController() {
-				frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
-				_ = c.writeFrame(ctx, ws, frame)
+				_ = c.SendResize(ctx, cols, rows)
 			}
 		case <-resizeEvents:
 			cols, rows := c.terminalSize()
 			c.RenderCurrentFull()
 			if !c.restoreEnabled() && !c.DisableResizePropagation && c.isController() {
-				frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
-				_ = c.writeFrame(ctx, ws, frame)
+				_ = c.SendResize(ctx, cols, rows)
 			}
 		case <-c.controlCh:
 			if c.restoreEnabled() || c.DisableResizePropagation || !c.isController() || ws == nil {
 				continue
 			}
 			cols, rows := c.terminalSize()
-			frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
-			_ = c.writeFrame(ctx, ws, frame)
+			_ = c.SendResize(ctx, cols, rows)
 		}
 	}
 }

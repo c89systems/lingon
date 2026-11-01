@@ -180,6 +180,34 @@ func TestHubViewOnlyDeniedControl(t *testing.T) {
 	}
 }
 
+func TestHubExplicitGeometryRespectsControlScope(t *testing.T) {
+	for _, scope := range []ShareScope{ShareScopeView, ShareScopeControl} {
+		hub := NewHub(nil)
+		host := &fakeConn{id: "host", role: RoleHost, sessionID: "s1", scope: ShareScopeControl}
+		if err := hub.RegisterHost(host, "s1", 80, 24); err != nil {
+			t.Fatal(err)
+		}
+		client := &fakeConn{id: "client", role: RoleClient, sessionID: "s1", scope: scope}
+		hub.RegisterClient(client, "s1", "client", false)
+		before := host.sentLen()
+		frame := &protocolpb.Frame{SessionId: "s1", Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: 100, Rows: 50, Explicit: true}}}
+		err := hub.HandleClientFrame(t.Context(), client, frame)
+		if scope == ShareScopeView {
+			if err == nil || host.sentLen() != before {
+				t.Fatal("view-only geometry reached host")
+			}
+		} else {
+			if err != nil {
+				t.Fatal(err)
+			}
+			last := host.sentFrame(host.sentLen() - 1).GetResize()
+			if last == nil || !last.Explicit || last.Cols != 100 || last.Rows != 50 {
+				t.Fatalf("explicit geometry lost: %v", last)
+			}
+		}
+	}
+}
+
 func TestHubControlTakesLeaseOnCommand(t *testing.T) {
 	hub := NewHub(nil)
 	host := &fakeConn{id: "host", role: RoleHost, sessionID: "s1", scope: ShareScopeControl}

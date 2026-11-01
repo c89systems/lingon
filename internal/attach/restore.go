@@ -8,6 +8,7 @@ import (
 
 	"pkt.systems/lingon/internal/mvu"
 	"pkt.systems/lingon/internal/protocolpb"
+	"pkt.systems/lingon/internal/terminal"
 )
 
 type restoreRequest struct{ cols, rows, localCols, localRows int }
@@ -42,8 +43,7 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 		return
 	}
 	c.restoreRequest = request
-	sequence := fmt.Sprintf("\x1b[8;%d;%dt", rows, cols)
-	if err := writeAll(c.clock(), c.stdoutWriter(), []byte(sequence)); err != nil {
+	if err := writeAll(c.clock(), c.stdoutWriter(), terminal.WindowResizeSequence(terminal.WindowSize{Cols: cols, Rows: rows})); err != nil {
 		return
 	}
 	scheduler, ctx := c.effectRuntime()
@@ -70,6 +70,9 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 func (c *Client) toggleRestore() bool {
 	enabled := !c.restoreMode.Load()
 	c.restoreMode.Store(enabled)
+	if enabled && c.geometry != nil {
+		c.geometry.request.Set(terminal.WindowSize{})
+	}
 	c.renderMu.Lock()
 	c.restoreRequest = restoreRequest{}
 	c.renderMu.Unlock()

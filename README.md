@@ -252,7 +252,7 @@ Interactive host options (selection):
 - `--token` access token (overrides stored auth)
 - `--auth-file` path to auth file
 - `--shell` override login shell path
-- `-g, --geometry` terminal size as `COLSxROWS`, for example `80x24`; overrides `--cols`/`--rows`
+- `-g, --geometry` terminal size as `COLSxROWS`, for example `80x24`; resizes the interactive terminal window and PTY; overrides `--cols`/`--rows`
 - `--cols`, `--rows` terminal size (`0` means auto-detect for interactive host; built-in default for headless)
 - `--scrollback-lines` scrollback lines
 - `--term` TERM value for the PTY
@@ -330,6 +330,19 @@ open. This is a desktop terminal feature; Android is unchanged.
 
 #### Restore the remote terminal size
 
+`lingon attach -g 100x50 [session-id]` (also `lingon a`) requests that size
+for both the local terminal window and remote session. `--cols` and `--rows`
+set individual dimensions; an unspecified or zero dimension uses the local
+terminal size. Geometry overrides those flags. Explicit sizing also resizes an
+interactive remote host's terminal window, overriding its usual viewport
+protection. It applies to the selected tab and follows tab switches; after the
+local window acknowledges the request, manual resizing resumes. If a terminal
+refuses the request, Lingon warns and preserves the requested remote size.
+Both ends must run a version supporting explicit geometry.
+
+`lingon -g 100x50`, `--cols` and `--rows` likewise request the interactive host
+window size. Detached headless startup sets only its PTY size.
+
 `lingon attach -r [session-id]` (or `--restore`) preserves the remote viewport
 and requests a matching local terminal window. It works with relay sessions,
 share tokens and local `attach -x`. Press `Ctrl+l !` to toggle the mode while
@@ -337,6 +350,9 @@ attached. Restoration follows tab switches and remote viewport changes; local
 window changes do not resize the remote session while it is enabled. Turning
 it off resumes the usual resize policy (remote headless sessions follow the
 local viewport; interactive hosts retain their own size).
+`--restore` takes precedence over geometry, `--cols` and `--rows`, ignoring
+them entirely. After toggling restoration off, an attachment started with
+explicit geometry can again resize interactive remote hosts.
 
 The request is the xterm window operation `CSI 8 ; rows ; columns t`, in character
 cells. Lingon checks the resulting local size and warns if it still differs;
@@ -389,6 +405,8 @@ Attach options (selection):
 - `--access-token` access token for authenticated attach
 - `--request-control` request controller lease on connect
 - `-r, --restore` preserve remote dimensions and request a matching local terminal window
+- `-g, --geometry COLSxROWS` resize the local terminal and remote session; ignored with `--restore`
+- `--cols`, `--rows` size individual dimensions (`0` uses local size); ignored with `--restore`
 - `--pick` interactively pick a session
 - `--hostname-only` show hostname-only connect/disconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)

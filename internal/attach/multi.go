@@ -40,7 +40,9 @@ type MultiClient struct {
 	AccessToken    string
 	RequestControl bool
 	// Restore keeps remote viewport dimensions and requests a matching local window.
-	Restore                     bool
+	Restore bool
+	// Cols and Rows explicitly size the local window and remote viewport. Restore takes precedence.
+	Cols, Rows                  int
 	HostnameOnly                bool
 	SessionID                   string
 	DisableDesktopNotifications bool
@@ -205,7 +207,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 	}
 	localSessionMode := m.SessionSource != nil
 	sessionAllowsResize := func(session SessionInfo) bool {
-		return localSessionMode || session.Headless
+		return localSessionMode || session.Headless || (!m.Restore && (m.Cols > 0 || m.Rows > 0))
 	}
 	if m.Clock == nil {
 		m.Clock = clock.New()
@@ -262,6 +264,11 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		termSize = func() (int, int) {
 			return terminalSizeAny(stdout, stdin)
 		}
+	}
+	localCols, localRows := termSize()
+	geometry, err := newClientGeometry(m.Cols, m.Rows, localCols, localRows, m.Restore)
+	if err != nil {
+		return err
 	}
 	ownsStdin := m.Stdin != nil
 	defer restoreCursor(m.Clock, stdout)
@@ -838,6 +845,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		client := &Client{
 			restoreMode: restoreMode,
+			geometry:    geometry,
 			// Clear inherited screen contents only when presenting the first local
 			// view. Loading a different tab must preserve the display baseline.
 			forceClear:                  seed.forceClear,
@@ -1447,6 +1455,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			mu.Unlock()
 			setTabs()
 			if changedActive {
+				_ = view.client.applyGeometry(ctx)
 				ui.ApplyAction(mvu.TabWakeAction{Duration: 0})
 				if view.client != nil {
 					view.client.ForceTabsVisibleOnce()

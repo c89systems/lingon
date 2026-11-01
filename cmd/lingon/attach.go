@@ -21,6 +21,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	var accessToken string
 	var requestControl bool
 	var restore bool
+	var cols, rows int
 	var pick bool
 	var authFile string
 	var logFile string
@@ -44,6 +45,10 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 		Short:   "Attach to a Lingon session",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			colsValue, rowsValue, err := resolveAttachSize(cmd, cols, rows, restore)
+			if err != nil {
+				return err
+			}
 			headlessMode, err := cmd.Flags().GetBool("headless")
 			if err != nil {
 				return err
@@ -140,6 +145,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 					}
 				}
 				err = lingon.Attach(cmd.Context(), lingon.AttachOptions{
+					Cols: colsValue, Rows: rowsValue,
 					Restore:                     restore,
 					Endpoint:                    "local://headless",
 					SessionID:                   sessionID,
@@ -234,6 +240,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 				sessionID = sessions[0].ID
 			}
 			err = lingon.Attach(cmd.Context(), lingon.AttachOptions{
+				Cols: colsValue, Rows: rowsValue,
 				Restore:                     restore,
 				Endpoint:                    endpointValue,
 				SessionID:                   sessionID,
@@ -259,6 +266,9 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
+	flags.IntVar(&cols, "cols", 0, "resize local terminal and remote session columns (0 keeps the local width; ignored with --restore)")
+	flags.IntVar(&rows, "rows", 0, "resize local terminal and remote session rows (0 keeps the local height; ignored with --restore)")
+	flags.StringP(geometryFlagName, "g", "", "resize local terminal and remote session to COLSxROWS (overrides --cols/--rows; ignored with --restore)")
 	flags.BoolVarP(&restore, "restore", "r", false, "preserve remote viewport size and resize the local terminal to match (Ctrl+L ! toggles)")
 	flags.StringVarP(&endpoint, "endpoint", "e", lingon.DefaultClientEndpoint, "relay endpoint (https/wss base URL; assumes https:// if omitted)")
 	flags.StringVarP(&shareToken, "token", "t", "", "share token for anonymous attach")
