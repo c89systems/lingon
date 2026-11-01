@@ -509,6 +509,20 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 			clipboardInput.Reader = r.opts.ClipboardReader
 		}
 		var rename control.RenamePrompt
+		var search control.SearchPrompt
+		searchSessions := func() []control.SearchSession {
+			current := r.combinedSessions()
+			items := make([]control.SearchSession, 0, len(current))
+			for _, s := range current {
+				items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name)})
+			}
+			return items
+		}
+		showSearch := func() {
+			text, ghost := search.Display(searchSessions())
+			r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost}})
+			r.forceRedraw(stdout)
+		}
 		pending := make([]byte, 0, 4096)
 		var scrollState scrollInputState
 		for {
@@ -608,6 +622,21 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 				return true
 			}
 			processNormalByte := func(b byte) bool {
+				if search.DiscardEscapeTail(b) {
+					return true
+				}
+				if search.Active {
+					id, done := search.Feed(b, searchSessions())
+					showSearch()
+					if done && id != "" {
+						if r.isLocalSession(id) {
+							r.activateLocalSession(id, stdout, stdin)
+						} else if err := r.activateRemote(sigCtx, id, stdout, stdin); err != nil {
+							r.showErrorStatus(err.Error(), stdout, 3*time.Second)
+						}
+					}
+					return true
+				}
 				if rename.DiscardEscapeTail(b) {
 					return true
 				}
@@ -654,6 +683,10 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 					}
 					r.setTabSuppressed(activeID, false)
 					switch action {
+					case control.ActionSearch:
+						search.Begin(r.clock)
+						showSearch()
+						return true
 					case control.ActionHelp:
 						r.runtime().ApplyAction(mvu.HelpVisibleAction{Visible: true})
 						r.forceRedraw(stdout)

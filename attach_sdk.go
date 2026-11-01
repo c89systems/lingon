@@ -19,13 +19,15 @@ import (
 
 // AttachOptions configures an attach client session.
 type AttachOptions struct {
-	Endpoint                    string
-	SessionID                   string
-	UnixSocket                  string
-	HeadlessConfigDir           string
-	AccessToken                 string
-	ShareToken                  string
-	RequestControl              bool
+	Endpoint          string
+	SessionID         string
+	UnixSocket        string
+	HeadlessConfigDir string
+	AccessToken       string
+	ShareToken        string
+	RequestControl    bool
+	// Restore requests a local terminal window matching the remote viewport.
+	Restore                     bool
 	HostnameOnly                bool
 	Theme                       string
 	DisableDesktopNotifications bool
@@ -49,6 +51,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 			_ = stopWatcher()
 		}()
 		client := &attach.MultiClient{
+			Restore:                     opts.Restore,
 			Endpoint:                    opts.Endpoint,
 			SessionID:                   opts.SessionID,
 			RequestControl:              opts.RequestControl,
@@ -67,6 +70,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 	}
 	if opts.UnixSocket != "" {
 		client := &attach.Client{
+			Restore:                     opts.Restore,
 			Endpoint:                    opts.Endpoint,
 			SessionID:                   opts.SessionID,
 			UnixSocket:                  opts.UnixSocket,
@@ -83,6 +87,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 	}
 	if opts.ShareToken != "" {
 		client := &attach.Client{
+			Restore:                     opts.Restore,
 			Endpoint:                    opts.Endpoint,
 			SessionID:                   opts.SessionID,
 			AccessToken:                 opts.AccessToken,
@@ -100,6 +105,7 @@ func Attach(ctx context.Context, opts AttachOptions) error {
 		return client.Run(ctx)
 	}
 	client := &attach.MultiClient{
+		Restore:                     opts.Restore,
 		Endpoint:                    opts.Endpoint,
 		SessionID:                   opts.SessionID,
 		AccessToken:                 opts.AccessToken,

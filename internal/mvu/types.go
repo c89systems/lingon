@@ -20,6 +20,7 @@ type State struct {
 	Theme     theme.TUITheme
 
 	HelpVisible bool
+	Search      SearchState
 
 	ConnectionMessage   string
 	ConnectionStyle     BannerStyle

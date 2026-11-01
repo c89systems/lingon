@@ -36,9 +36,11 @@ import (
 
 // MultiClient manages multiple attach sessions with tab switching.
 type MultiClient struct {
-	Endpoint                    string
-	AccessToken                 string
-	RequestControl              bool
+	Endpoint       string
+	AccessToken    string
+	RequestControl bool
+	// Restore keeps remote viewport dimensions and requests a matching local window.
+	Restore                     bool
 	HostnameOnly                bool
 	SessionID                   string
 	DisableDesktopNotifications bool
@@ -194,6 +196,7 @@ func sessionByID(sessions []SessionInfo, id string) (SessionInfo, bool) {
 
 // Run starts the multi-session attach client.
 func (m *MultiClient) Run(ctx context.Context) error {
+	restoreMode := newRestoreMode(m.Restore)
 	if m.Logger == nil {
 		m.Logger = logging.Default()
 	}
@@ -834,6 +837,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			tokenRefresher = m.refreshToken
 		}
 		client := &Client{
+			restoreMode: restoreMode,
 			// Clear inherited screen contents only when presenting the first local
 			// view. Loading a different tab must preserve the display baseline.
 			forceClear:                  seed.forceClear,
@@ -1900,6 +1904,26 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 	}()
 	var rename control.RenamePrompt
+	var search control.SearchPrompt
+	searchSessions := func() []control.SearchSession {
+		mu.Lock()
+		defer mu.Unlock()
+		items := make([]control.SearchSession, 0, len(sessions))
+		for _, s := range sessions {
+			items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name)})
+		}
+		return items
+	}
+	showSearch := func() {
+		text, ghost := search.Display(searchSessions())
+		state := mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost}
+		_, client, _, _, _ := activeViewSnapshot()
+		if client != nil {
+			client.renderSearch(state)
+		} else {
+			ui.ApplyAction(mvu.SearchAction{Search: state})
+		}
+	}
 	manageSession := func(client *Client, req sessionmanage.Request) {
 		mu.Lock()
 		if managementBusy {
@@ -2124,6 +2148,17 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		processNormalByte := func(b byte) bool {
 			_, client, _, _, _ := activeViewSnapshot()
+			if search.DiscardEscapeTail(b) {
+				return true
+			}
+			if search.Active {
+				id, done := search.Feed(b, searchSessions())
+				showSearch()
+				if done && id != "" {
+					_ = activateView(id)
+				}
+				return true
+			}
 			if rename.DiscardEscapeTail(b) {
 				return true
 			}
@@ -2169,6 +2204,21 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					return false
 				}
 				switch action {
+				case control.ActionToggleRestore:
+					if client != nil {
+						if client.toggleRestore() {
+							showConnected("Restore: remote size preserved", 2*time.Second)
+						} else {
+							showConnected("Restore off", 2*time.Second)
+							processResizeEvent()
+						}
+						renderActiveCurrent()
+					}
+					return true
+				case control.ActionSearch:
+					search.Begin(m.Clock)
+					showSearch()
+					return true
 				case control.ActionHelp:
 					ui.ApplyAction(mvu.HelpVisibleAction{Visible: true})
 					renderActiveCurrent()

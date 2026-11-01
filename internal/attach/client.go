@@ -60,12 +60,14 @@ type Client struct {
 	AccessToken    string
 	ShareToken     string
 	RequestControl bool
-	HostnameOnly   bool
-	TLSDir         string
-	Insecure       bool
-	UnixSocket     string
-	Theme          string
-	ClientID       string
+	// Restore requests that the local terminal follow remote viewport dimensions.
+	Restore      bool
+	HostnameOnly bool
+	TLSDir       string
+	Insecure     bool
+	UnixSocket   string
+	Theme        string
+	ClientID     string
 	// AllowOfflineToggle permits Ctrl+L o to be forwarded to a local host transport.
 	AllowOfflineToggle bool
 	// DisableDesktopNotifications suppresses best-effort desktop notifications for inactivity walls.
@@ -103,6 +105,9 @@ type Client struct {
 	holderID string
 
 	mu                        sync.RWMutex
+	restoreMode               *atomic.Bool
+	restoreRequest            restoreRequest       // protected by renderMu
+	searchBaseline            *protocolpb.Snapshot // protected by renderMu
 	lastSnapshot              *protocolpb.Snapshot
 	lastSeq                   uint64
 	needsResync               bool
@@ -213,6 +218,9 @@ func (c *Client) RunDetached(ctx context.Context) error {
 }
 
 func (c *Client) run(ctx context.Context, opts runOptions) error {
+	if c.restoreMode == nil {
+		c.restoreMode = newRestoreMode(c.Restore)
+	}
 	if c.Logger == nil {
 		c.Logger = logging.Default()
 	}
@@ -687,6 +695,7 @@ func (c *Client) markReady() {
 func (c *Client) SetStdout(w io.Writer) {
 	c.renderMu.Lock()
 	c.stdout = w
+	c.restoreRequest = restoreRequest{}
 	c.renderMu.Unlock()
 }
 
@@ -840,6 +849,9 @@ func (c *Client) SendCommand(ctx context.Context, kind protocolpb.CommandKind) e
 
 // SendResize forwards a resize request to the server.
 func (c *Client) SendResize(ctx context.Context, cols, rows int) error {
+	if c.restoreEnabled() {
+		return nil
+	}
 	if cols <= 0 || rows <= 0 {
 		return nil
 	}
@@ -1313,6 +1325,9 @@ func (c *Client) renderSnapshot(snap *protocolpb.Snapshot) {
 }
 
 func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
+	if c.HasSnapshot() {
+		c.restoreTerminalLocked(snap)
+	}
 	forceFull := c.forceClear
 	c.forceClear = false
 	cols, rows := c.terminalSize()
@@ -2122,6 +2137,9 @@ func (c *Client) helloLastSeq() uint64 {
 }
 
 func (c *Client) buildHelloFrame(cols, rows int) *protocolpb.Frame {
+	if c.restoreEnabled() {
+		cols, rows = 0, 0
+	}
 	lastSeq := c.helloLastSeq()
 	return &protocolpb.Frame{
 		SessionId: c.SessionID,
@@ -2156,6 +2174,17 @@ func (c *Client) newClientID() string {
 func (c *Client) writeFrame(ctx context.Context, ws *websocket.Conn, frame *protocolpb.Frame) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	// Recheck at delivery: a normal-mode resize/resync may have waited behind
+	// earlier input while the user enabled restoration.
+	if c.restoreEnabled() {
+		if frame.GetResize() != nil {
+			return nil
+		}
+		if frame.GetHello() != nil {
+			frame = proto.Clone(frame).(*protocolpb.Frame)
+			frame.GetHello().Cols, frame.GetHello().Rows = 0, 0
+		}
+	}
 	if err := writeFrame(ctx, ws, frame); err != nil {
 		return err
 	}
@@ -2192,6 +2221,19 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 	buf := make([]byte, 1024)
 	prefill := make([]byte, 0, 1024)
 	var prefix control.Prefix
+	var search control.SearchPrompt
+	searchSessions := func() []control.SearchSession {
+		name := c.SessionID
+		state := c.readCompositorState()
+		if state.ActiveTab >= 0 && state.ActiveTab < len(state.Tabs) {
+			name = state.Tabs[state.ActiveTab].Title
+		}
+		return []control.SearchSession{{ID: c.SessionID, Name: name}}
+	}
+	showSearch := func() {
+		text, ghost := search.Display(searchSessions())
+		c.renderSearch(mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost})
+	}
 	pending := make([]byte, 0, 2048)
 	var scrollState scrollInputState
 	for {
@@ -2232,6 +2274,14 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 			return true
 		}
 		processNormalByte := func(b byte) bool {
+			if search.DiscardEscapeTail(b) {
+				return true
+			}
+			if search.Active {
+				search.Feed(b, searchSessions())
+				showSearch()
+				return true
+			}
 			helpVisible := c.helpVisible()
 			if action, ok := mvu.ActionForHelpDismissKey(helpVisible, b); ok {
 				c.applyCompositorAction(action)
@@ -2255,6 +2305,22 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return false
 				}
 				switch action {
+				case control.ActionSearch:
+					search.Begin(c.clock())
+					showSearch()
+					return true
+				case control.ActionToggleRestore:
+					if c.toggleRestore() {
+						c.showInfoStatus("Restore: remote size preserved")
+					} else {
+						c.showInfoStatus("Restore off")
+						if !c.DisableResizePropagation {
+							cols, rows := c.terminalSize()
+							_ = c.SendResize(ctx, cols, rows)
+						}
+					}
+					c.renderCurrent()
+					return true
 				case control.ActionHelp:
 					c.applyCompositorAction(mvu.HelpVisibleAction{Visible: true})
 					c.renderCurrent()
@@ -2627,19 +2693,19 @@ func (c *Client) handleResize(ctx context.Context, ws *websocket.Conn) {
 		case <-ch:
 			cols, rows := c.terminalSize()
 			c.RenderCurrentFull()
-			if !c.DisableResizePropagation && c.isController() {
+			if !c.restoreEnabled() && !c.DisableResizePropagation && c.isController() {
 				frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
 				_ = c.writeFrame(ctx, ws, frame)
 			}
 		case <-resizeEvents:
 			cols, rows := c.terminalSize()
 			c.RenderCurrentFull()
-			if !c.DisableResizePropagation && c.isController() {
+			if !c.restoreEnabled() && !c.DisableResizePropagation && c.isController() {
 				frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
 				_ = c.writeFrame(ctx, ws, frame)
 			}
 		case <-c.controlCh:
-			if c.DisableResizePropagation || !c.isController() || ws == nil {
+			if c.restoreEnabled() || c.DisableResizePropagation || !c.isController() || ws == nil {
 				continue
 			}
 			cols, rows := c.terminalSize()

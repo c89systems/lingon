@@ -312,6 +312,44 @@ When switching local headless tabs, a session awaiting its first snapshot keeps
 the displayed contents under a loading banner. Its first snapshot replaces the
 contents; tab switching does not clear the screen.
 
+#### Find a session
+
+In the interactive host and `lingon attach`, press `Ctrl+l /` to open a search
+field at the bottom left. Type a case-sensitive session-name prefix; the rest
+of the suggested name appears in gray. Enter accepts the suggestion and opens
+that exact session. Tab first fills the suggestion; further Tab presses cycle
+through session names in tab order, wrapping at the end. Tab on an empty field
+starts with the first tab. An exact typed name takes precedence over longer
+prefix matches. Duplicate names remain separate selectable sessions.
+
+Search keeps the current session active until Enter. Escape or Ctrl+C cancels;
+Backspace edits the prefix. Enter with no matching session leaves the field
+open. This is a desktop terminal feature; Android is unchanged.
+
+#### Restore the remote terminal size
+
+`lingon attach -r [session-id]` (or `--restore`) preserves the remote viewport
+and requests a matching local terminal window. It works with relay sessions,
+share tokens and local `attach -x`. Press `Ctrl+l !` to toggle the mode while
+attached. Restoration follows tab switches and remote viewport changes; local
+window changes do not resize the remote session while it is enabled. Turning
+it off resumes the usual resize policy (remote headless sessions follow the
+local viewport; interactive hosts retain their own size).
+
+The request is the xterm window operation `CSI 8 ; rows ; columns t`, in character
+cells. Lingon checks the resulting local size and warns if it still differs;
+the attachment stays usable and the remote size stays intact. Resizing is a
+request to the terminal emulator and window manager, so it cannot force an
+unsupported or restricted window to resize.
+
+| Terminal/layer | Resize support |
+| --- | --- |
+| [Xterm](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html) | Supports the sequence; enable it with `XTerm*allowWindowOps: true` when window operations are disabled. `disallowedWindowOps` can restrict individual operations. |
+| [XFCE Terminal](https://github.com/xfce-mirror/xfce4-terminal/blob/master/terminal/terminal-screen.c) | Handles VTE's resize request for the active terminal; ignores it when maximized or fullscreen. |
+| [iTerm2](https://iterm2.com/documentation-preferences-profiles-terminal.html) | Enable “A session may cause the window to resize” in the terminal profile. |
+| [Tmux](https://github.com/tmux/tmux/blob/master/input.c) | Consumes the ordinary resize sequence; use a direct terminal for window restoration. Split panes also constrain the available grid. |
+| Other terminals / window managers | Support varies. A reported `TERM=xterm-256color` alone does not establish window-resize support. Tiling, fullscreen and screen-size constraints may prevent an exact fit. |
+
 #### Create and rename sessions
 
 - In `lingon attach` (including `attach -x`), `Ctrl+l c` starts and selects a
@@ -348,6 +386,7 @@ Attach options (selection):
 - `-t, --token` share token for anonymous attach
 - `--access-token` access token for authenticated attach
 - `--request-control` request controller lease on connect
+- `-r, --restore` preserve remote dimensions and request a matching local terminal window
 - `--pick` interactively pick a session
 - `--hostname-only` show hostname-only connect/disconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)

@@ -6,6 +6,19 @@ import (
 	"pkt.systems/lingon"
 )
 
+func TestAttachRestoreFlagAliases(t *testing.T) {
+	for _, flag := range []string{"-r", "--restore"} {
+		cmd := NewAttachCommand(lingon.NewLoader())
+		if err := cmd.Flags().Parse([]string{flag, "session"}); err != nil {
+			t.Fatal(err)
+		}
+		enabled, err := cmd.Flags().GetBool("restore")
+		if err != nil || !enabled {
+			t.Fatalf("%s: %v %v", flag, enabled, err)
+		}
+	}
+}
+
 func TestAttachHostnameOnlyFlag(t *testing.T) {
 	loader := lingon.NewLoader()
 	cmd := NewAttachCommand(loader)

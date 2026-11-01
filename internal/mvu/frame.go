@@ -132,6 +132,10 @@ func ComposeResolved(base []byte, cols, rows int, cursor Cursor, resolved Resolv
 		DrawHelpBox(&buf, cols, rows, state.Theme, HelpLines(state))
 	}
 	composeTopOverlay(&buf, cols, cursor, resolved, true, 0, 0)
+	drawSearch(&buf, cols, rows, state.Search)
+	if state.Search.Visible {
+		WriteCursor(&buf, searchCursor(state.Search, cols, rows, cursor))
+	}
 	return buf.Bytes()
 }
 

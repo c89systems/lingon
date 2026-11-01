@@ -261,6 +261,7 @@ func RenderAttach(in AttachRenderInput) (AttachRenderOutput, error) {
 }
 
 func renderSnapshot(w io.Writer, prev, snap *protocolpb.Snapshot, cols, rows int, forceClear bool, resolved Resolved, cursor Cursor, top topOverlayRenderOptions) error {
+	cursor = searchCursor(resolved.State.Search, cols, rows, cursor)
 	if forceClear {
 		return render.SnapshotViewport(w, snap, cols, rows)
 	}

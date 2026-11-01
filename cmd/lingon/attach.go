@@ -20,6 +20,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	var shareToken string
 	var accessToken string
 	var requestControl bool
+	var restore bool
 	var pick bool
 	var authFile string
 	var logFile string
@@ -138,6 +139,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 					}
 				}
 				err = lingon.Attach(cmd.Context(), lingon.AttachOptions{
+					Restore:                     restore,
 					Endpoint:                    "local://headless",
 					SessionID:                   sessionID,
 					HeadlessConfigDir:           configDirForLoader(loader),
@@ -231,6 +233,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 				sessionID = sessions[0].ID
 			}
 			err = lingon.Attach(cmd.Context(), lingon.AttachOptions{
+				Restore:                     restore,
 				Endpoint:                    endpointValue,
 				SessionID:                   sessionID,
 				AccessToken:                 tokenValue,
@@ -255,6 +258,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
+	flags.BoolVarP(&restore, "restore", "r", false, "preserve remote viewport size and resize the local terminal to match (Ctrl+L ! toggles)")
 	flags.StringVarP(&endpoint, "endpoint", "e", lingon.DefaultClientEndpoint, "relay endpoint (https/wss base URL; assumes https:// if omitted)")
 	flags.StringVarP(&shareToken, "token", "t", "", "share token for anonymous attach")
 	flags.StringVar(&accessToken, "access-token", "", "access token for authenticated attach")

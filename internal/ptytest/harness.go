@@ -452,6 +452,8 @@ func (h *Harness) startProxy() {
 
 // HostOptions configures a PTY-backed host session.
 type HostOptions struct {
+	// AllowRemoteResize publishes a headless-style viewport that controllers may resize.
+	AllowRemoteResize           bool
 	ClipboardReader             clipboard.Reader
 	SessionID                   string
 	SessionName                 string
@@ -541,6 +543,7 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 	disableDesktopNotifications, desktopNotifier := effectiveHostDesktopNotificationConfig(opts)
 	resizeCh := make(chan struct{}, 1)
 	runner := session.New(session.Options{
+		AllowRemoteResize:           opts.AllowRemoteResize,
 		ClipboardReader:             opts.ClipboardReader,
 		Endpoint:                    h.endpoint,
 		Token:                       token,
@@ -586,6 +589,8 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 
 // AttachOptions configures a PTY-backed attach client.
 type AttachOptions struct {
+	// Restore enables remote-size following in this test-owned PTY.
+	Restore         bool
 	ClipboardReader clipboard.Reader
 	SessionID       string
 	ClientID        string
@@ -671,6 +676,7 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 		opts.DesktopNotifier,
 	)
 	client := &attach.Client{
+		Restore:                     opts.Restore,
 		ClipboardReader:             opts.ClipboardReader,
 		Endpoint:                    h.endpoint,
 		SessionID:                   opts.SessionID,
@@ -725,6 +731,8 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 
 // MultiAttachOptions configures a PTY-backed multi-session attach client.
 type MultiAttachOptions struct {
+	// Restore enables remote-size following in this test-owned PTY.
+	Restore   bool
 	SessionID string
 	Cols      int
 	Rows      int
@@ -816,6 +824,7 @@ func (h *Harness) StartMultiAttach(opts MultiAttachOptions) *PTYSession {
 		opts.DesktopNotifier,
 	)
 	client := &attach.MultiClient{
+		Restore:                     opts.Restore,
 		Endpoint:                    endpoint,
 		TLSDir:                      h.tlsDir,
 		AccessToken:                 token,
