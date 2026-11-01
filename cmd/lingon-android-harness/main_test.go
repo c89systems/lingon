@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +11,46 @@ import (
 	"sync"
 	"testing"
 )
+
+func TestHarnessReusesExplicitHostIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	h, err := startHarness(ctx, harnessOptions{cleartext: true, basePath: "/v1", username: "reuse-test", password: "test-only", cols: 80, rows: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.stop()
+	client := h.server.Client()
+	for _, query := range []string{"session_id=../unsafe", "session_id=named&count=2"} {
+		response, err := client.Post(h.endpoint+"/__harness/start-host?"+query, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid fixture accepted: %s", query)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		// /bin/true is noninteractive; runner stdio is /dev/null and any PTY is
+		// a fixture-owned child. This never accesses the runner's terminal.
+		response, err := client.Post(h.endpoint+"/__harness/start-host?session_id=named&shell=/bin/true", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&body)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK || len(body.IDs) != 1 || body.IDs[0] != "named" {
+			t.Fatalf("named fixture: %+v status=%d error=%v", body, response.StatusCode, err)
+		}
+		if err := h.stopHost("named"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestHarnessTransportModes(t *testing.T) {
 	for _, cleartext := range []bool{false, true} {

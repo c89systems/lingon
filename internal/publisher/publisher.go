@@ -722,9 +722,6 @@ func (p *Publisher) sendScrollbackSnapshot() {
 		return
 	}
 	rows := p.scrollbackSnapshot()
-	if len(rows) == 0 {
-		return
-	}
 	p.mu.Lock()
 	cols := p.opts.Cols
 	if p.lastSnap != nil {

@@ -70,6 +70,7 @@ type sessionState struct {
 	cols            int
 	rows            int
 	seq             uint64
+	hostStartSeq    uint64
 	history         []*protocolpb.Frame
 	historyBytes    int
 	replayMu        sync.RWMutex
@@ -121,10 +122,14 @@ func (h *Hub) registerHost(conn connection, sessionID string, cols, rows int) co
 	if state.host != nil && state.host.ID() != conn.ID() {
 		replaced = state.host
 		h.failManagementLocked(state.host.ID())
-		state.history = nil
-		state.historyBytes = 0
 		h.logger.Info("relay.hub.host.takeover", "session", sessionID, "old_conn", state.host.ID(), "new_conn", conn.ID())
 	}
+	// A new host connection must establish its own snapshot baseline, including
+	// after a disconnected/terminated host reused the same session ID. Keep the
+	// sequence monotonic, but never replay another host's output or closure.
+	state.history = nil
+	state.historyBytes = 0
+	state.hostStartSeq = state.seq
 	state.host = conn
 	state.cols = cols
 	state.rows = rows
@@ -735,7 +740,7 @@ func (h *Hub) recordFrameLocked(state *sessionState, frame *protocolpb.Frame) {
 }
 
 func (h *Hub) replaySinceLocked(state *sessionState, lastSeq uint64) (bool, []*protocolpb.Frame) {
-	if state == nil || lastSeq == 0 || len(state.history) == 0 {
+	if state == nil || lastSeq == 0 || lastSeq <= state.hostStartSeq || len(state.history) == 0 {
 		return false, nil
 	}
 	if lastSeq > state.seq {
