@@ -2252,8 +2252,9 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		return []control.SearchSession{{ID: c.SessionID, Name: name}}
 	}
 	showSearch := func() {
-		text, ghost := search.Display(searchSessions())
-		c.renderSearch(mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost})
+		items := searchSessions()
+		text, ghost := search.Display(items)
+		c.renderSearch(mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost, CandidateID: search.CandidateID(items)})
 	}
 	pending := make([]byte, 0, 2048)
 	var scrollState scrollInputState

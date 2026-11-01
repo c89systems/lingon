@@ -91,3 +91,34 @@ func TestSearchAndRestorePrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchCandidateIdentityFollowsEditingAndDuplicateCycling(t *testing.T) {
+	items := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "alpha"}, {ID: "c", Name: "beta"}}
+	var prompt SearchPrompt
+	prompt.Begin(clock.NewMock())
+	if prompt.CandidateID(items) != "" {
+		t.Fatal("empty search highlighted a session")
+	}
+	for _, b := range []byte("al") {
+		prompt.Feed(b, items)
+	}
+	if prompt.CandidateID(items) != "a" {
+		t.Fatal("prefix candidate missing")
+	}
+	prompt.Feed('\t', items)
+	prompt.Feed('\t', items)
+	if prompt.CandidateID(items) != "b" {
+		t.Fatal("duplicate name lost candidate identity")
+	}
+	if prompt.CandidateID(items[:1]) != "a" {
+		t.Fatal("removed candidate retained")
+	}
+	prompt.Feed('z', items)
+	if prompt.CandidateID(items) != "" {
+		t.Fatal("no-match search retained a highlight")
+	}
+	prompt.Feed('\x1b', items)
+	if prompt.CandidateID(items) != "" {
+		t.Fatal("cancelled search retained a highlight")
+	}
+}

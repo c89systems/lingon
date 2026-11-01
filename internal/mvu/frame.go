@@ -34,6 +34,12 @@ type Resolved struct {
 // Resolve applies MVU update rules to raw UI state and cursor context.
 func Resolve(state State, cursor Cursor, now time.Time, opts ResolveOptions) Resolved {
 	resolved := state
+	if state.Search.Visible {
+		resolved.Tabs = append([]Tab(nil), state.Tabs...)
+		for i := range resolved.Tabs {
+			resolved.Tabs[i].Highlighted = state.Search.CandidateID != "" && resolved.Tabs[i].ID == state.Search.CandidateID
+		}
+	}
 	if resolved.ConnectionMessage != "" && !resolved.ConnectionExpiresAt.IsZero() && !now.Before(resolved.ConnectionExpiresAt) {
 		resolved.ConnectionMessage = ""
 		resolved.ConnectionShownAt = time.Time{}
@@ -52,6 +58,11 @@ func Resolve(state State, cursor Cursor, now time.Time, opts ResolveOptions) Res
 		resolved.TabBarExpiresAt = time.Time{}
 	}
 	connectionVisible := resolved.ConnectionMessage != ""
+	if state.Search.Visible {
+		// The search candidate owns the tab row while previewing a session.
+		connectionVisible = false
+		loadingVisible = false
+	}
 	scrollbackVisible := resolved.ScrollbackMessage != ""
 	disconnectVisible := resolved.DisconnectVisible && resolved.DisconnectTitle != ""
 	if disconnectVisible {
@@ -65,6 +76,8 @@ func Resolve(state State, cursor Cursor, now time.Time, opts ResolveOptions) Res
 	case scrollbackVisible:
 		tabBarVisible = false
 		loadingVisible = false
+	case resolved.Search.Visible:
+		tabBarVisible = len(resolved.Tabs) > 0
 	case opts.SuppressTabs:
 		tabBarVisible = false
 	case opts.ForceTabsVisible:
@@ -231,6 +244,7 @@ func tabBarSignature(cols int, state State) uint64 {
 		writeSigString(tab.Title)
 		writeSigBool(tab.Disabled)
 		writeSigBool(tab.Muted)
+		writeSigBool(tab.Highlighted)
 	}
 	return h.Sum64()
 }

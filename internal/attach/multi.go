@@ -1924,8 +1924,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		return items
 	}
 	showSearch := func() {
-		text, ghost := search.Display(searchSessions())
-		state := mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost}
+		items := searchSessions()
+		text, ghost := search.Display(items)
+		state := mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost, CandidateID: search.CandidateID(items)}
 		_, client, _, _, _ := activeViewSnapshot()
 		if client != nil {
 			client.renderSearch(state)

@@ -69,6 +69,16 @@ func (p *SearchPrompt) Display(sessions []SearchSession) (string, string) {
 	return text, ""
 }
 
+// CandidateID returns the immutable ID previewed by an open search.
+func (p *SearchPrompt) CandidateID(sessions []SearchSession) string {
+	if p.Active {
+		if session, ok := p.candidate(sessions); ok {
+			return session.ID
+		}
+	}
+	return ""
+}
+
 // Feed consumes an editing key. Enter returns the selected immutable session ID;
 // cancellation returns an empty ID. A missing match leaves the field open.
 func (p *SearchPrompt) Feed(b byte, sessions []SearchSession) (string, bool) {

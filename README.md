@@ -328,6 +328,12 @@ Search keeps the current session active until Enter. Escape or Ctrl+C cancels;
 Backspace edits the prefix. Enter with no matching session leaves the field
 open. This is a desktop terminal feature; Android is unchanged.
 
+The search candidate is marked with brackets in the tab bar, which scrolls to
+keep it visible as you type or cycle with Tab. Search temporarily shows the bar
+even when it is hidden. Cancellation restores the active tab and prior bar
+visibility. Outside search, the bar scrolls automatically to keep the active tab
+visible when switching tabs or resizing the window.
+
 #### Restore the remote terminal size
 
 `lingon attach -g 100x50 [session-id]` (also `lingon a`) requests that size

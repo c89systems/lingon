@@ -109,6 +109,7 @@ func BuildSessionTabs(sessions []SessionTabSource, activeID string, opts BuildSe
 			muted = opts.Muted[session.ID]
 		}
 		tabs = append(tabs, Tab{
+			ID:       session.ID,
 			Index:    i + 1,
 			Title:    label,
 			Disabled: disabled,

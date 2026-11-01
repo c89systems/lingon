@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 
+	"github.com/mattn/go-runewidth"
+
 	"pkt.systems/lingon/internal/theme"
 )
 
@@ -438,19 +440,14 @@ func DrawTabBar(w *bytes.Buffer, cols int, tabs []Tab, active int, ui theme.TUIT
 	w.WriteString(off)
 
 	col := 1
-	for i, tab := range tabs {
-		title := tabTitle(tab)
-		if title == "" {
-			continue
-		}
-		seg := " " + title + " "
+	start := tabViewportStart(tabs, active, cols)
+	for i := start; i < len(tabs); i++ {
+		tab := tabs[i]
 		remain := cols - col + 1
 		if remain <= 0 {
 			break
 		}
-		if len(seg) > remain {
-			seg = seg[:remain]
-		}
+		seg := tabSegment(tab, remain)
 		w.WriteString("\x1b[1;")
 		w.WriteString(itoa(col))
 		w.WriteString("H")
@@ -486,8 +483,42 @@ func DrawTabBar(w *bytes.Buffer, cols int, tabs []Tab, active int, ui theme.TUIT
 		if italic {
 			w.WriteString("\x1b[23m")
 		}
-		col += len(seg)
+		col += runewidth.StringWidth(seg)
 	}
+}
+
+// Keep the whole focused tab visible; earlier tabs slide out as needed.
+func tabViewportStart(tabs []Tab, active, cols int) int {
+	focus := active
+	if focus < 0 || focus >= len(tabs) {
+		focus = 0
+	}
+	for i, tab := range tabs {
+		if tab.Highlighted {
+			focus = i
+			break
+		}
+	}
+	start, width := 0, 0
+	for i := 0; i <= focus; i++ {
+		width += runewidth.StringWidth(tabSegment(tabs[i], cols))
+	}
+	for width > cols && start < focus {
+		width -= runewidth.StringWidth(tabSegment(tabs[start], cols))
+		start++
+	}
+	return start
+}
+
+func tabSegment(tab Tab, cols int) string {
+	title := tabTitle(tab)
+	if tab.Highlighted {
+		if cols >= 4 {
+			title = runewidth.Truncate(title, cols-4, "…")
+		}
+		title = "[" + title + "]"
+	}
+	return runewidth.Truncate(" "+title+" ", cols, "")
 }
 
 func tabTitle(tab Tab) string {

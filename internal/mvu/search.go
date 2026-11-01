@@ -12,6 +12,7 @@ import (
 type SearchState struct {
 	Visible     bool
 	Text, Ghost string
+	CandidateID string
 }
 
 // SearchAction updates the local search field independently of connection status.

@@ -539,8 +539,9 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 			return items
 		}
 		showSearch := func() {
-			text, ghost := search.Display(searchSessions())
-			r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost}})
+			items := searchSessions()
+			text, ghost := search.Display(items)
+			r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost, CandidateID: search.CandidateID(items)}})
 			r.forceRedraw(stdout)
 		}
 		pending := make([]byte, 0, 4096)
