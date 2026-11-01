@@ -185,13 +185,12 @@ type Runner struct {
 	effects     *mvu.EffectScheduler
 	tabSuppress mvu.SessionTabSuppression
 
-	viewMu            sync.RWMutex
-	activeSessionID   string
-	activeIsLocal     bool
-	preferredRemoteID string
-	remoteSessions    *remoteManager
-	clock             clock.Clock
-	trace             *trace.Writer
+	viewMu          sync.RWMutex
+	activeSessionID string
+	activeIsLocal   bool
+	remoteSessions  *remoteManager
+	clock           clock.Clock
+	trace           *trace.Writer
 
 	renderCursorMu      sync.Mutex
 	renderCursorRow     int
@@ -2495,33 +2494,6 @@ func (r *Runner) handleSessionListUpdate(sessions []remoteSessionInfo, stdout, s
 	activeID, _ := r.activeSession()
 	merged := r.mergeSessions(sessions)
 	mergedSources := mvu.SessionTabSourcesFrom(merged)
-	r.viewMu.RLock()
-	preferredRemoteID := r.preferredRemoteID
-	r.viewMu.RUnlock()
-	if preferredRemoteID != "" && r.remoteSessions != nil {
-		if !mvu.SessionIDExists(mergedSources, preferredRemoteID) {
-			r.viewMu.Lock()
-			if r.preferredRemoteID == preferredRemoteID {
-				r.preferredRemoteID = ""
-			}
-			r.viewMu.Unlock()
-			preferredRemoteID = ""
-		} else if activeID != preferredRemoteID {
-			if err := r.activateRemote(r.runCtx, preferredRemoteID, stdout, stdin); err == nil {
-				return
-			}
-			r.viewMu.Lock()
-			if r.preferredRemoteID == preferredRemoteID {
-				r.preferredRemoteID = ""
-			}
-			r.viewMu.Unlock()
-			preferredRemoteID = ""
-		}
-		if preferredRemoteID != "" {
-			r.refreshTabBar(stdout)
-			return
-		}
-	}
 	if activeID != "" && mvu.SessionIDExists(mergedSources, activeID) {
 		r.refreshTabBar(stdout)
 		return
@@ -3155,9 +3127,6 @@ func (r *Runner) switchTab(ctx context.Context, dir int, stdout, stdin *os.File)
 		return
 	}
 	if r.isLocalSession(nextID) {
-		r.viewMu.Lock()
-		r.preferredRemoteID = ""
-		r.viewMu.Unlock()
 		r.activateLocalSession(nextID, stdout, stdin)
 		return
 	}
@@ -3262,9 +3231,6 @@ func (r *Runner) activateRemote(ctx context.Context, sessionID string, stdout, s
 		return err
 	}
 	r.setActiveSession(sessionID, false)
-	r.viewMu.Lock()
-	r.preferredRemoteID = sessionID
-	r.viewMu.Unlock()
 	r.updateTabs(r.remoteSessions.Sessions())
 	r.remoteSessions.RenderClear(sessionID)
 	r.refreshTabBar(stdout)
