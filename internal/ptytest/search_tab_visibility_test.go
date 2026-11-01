@@ -133,3 +133,30 @@ func TestSearchHighlightsOverflowCandidateHostAndAttachPTY(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchBracketsPreserveTabLabelColumnsPTY(t *testing.T) {
+	for _, useAttach := range []bool{false, true} {
+		t.Run(fmt.Sprintf("attach=%v", useAttach), func(t *testing.T) {
+			terminal, _ := overflowSearchTerminal(t, useAttach)
+			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return strings.Contains(s.Row(0), "alpha-3") })
+			before := terminal.Screen().Row(0)
+			terminal.Send("\x0c/alpha-2")
+			searchField(t, terminal, "/ alpha-2")
+			after := terminal.Screen().Row(0)
+			for _, label := range []string{"alpha", "alpha-2", "alpha-3"} {
+				if want, got := strings.Index(before, label), strings.Index(after, label); want < 0 || got != want {
+					t.Fatalf("highlight moved %s: column %d -> %d\nbefore: %q\nafter:  %q", label, want, got, before, after)
+				}
+			}
+			// A following input batch resolves the mouse parser's ambiguous Escape
+			// prefix without relying on a real-time timeout.
+			terminal.Send("\x1bunchanged\r")
+			waitSearchScreen(t, terminal, func(s ptytest.Screen) bool {
+				return s.Contains("REPLY:unchanged") && !strings.HasPrefix(s.Row(s.Rows-1), "/ ")
+			})
+			if row := terminal.Screen().Row(0); row != before {
+				t.Fatalf("cancel shifted tab bar\nbefore: %q\nafter:  %q", before, row)
+			}
+		})
+	}
+}

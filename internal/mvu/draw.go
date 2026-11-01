@@ -512,13 +512,23 @@ func tabViewportStart(tabs []Tab, active, cols int) int {
 
 func tabSegment(tab Tab, cols int) string {
 	title := tabTitle(tab)
-	if tab.Highlighted {
-		if cols >= 4 {
-			title = runewidth.Truncate(title, cols-4, "…")
+	if cols < 2 {
+		if tab.Highlighted {
+			return runewidth.Truncate("["+title+"]", cols, "")
 		}
-		title = "[" + title + "]"
+		return runewidth.Truncate(" "+title+" ", cols, "")
 	}
-	return runewidth.Truncate(" "+title+" ", cols, "")
+	// Brackets occupy the same cells as ordinary tab padding. Keep clipping
+	// identical in both states so highlighting never shifts the title or its neighbors.
+	if cols == 2 {
+		title = ""
+	} else {
+		title = runewidth.Truncate(title, cols-2, "…")
+	}
+	if tab.Highlighted {
+		return "[" + title + "]"
+	}
+	return " " + title + " "
 }
 
 func tabTitle(tab Tab) string {

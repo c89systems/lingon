@@ -110,7 +110,7 @@ func TestTabSegmentsFitUnicodeAndNarrowViewports(t *testing.T) {
 			if !utf8.ValidString(segment) || runewidth.StringWidth(segment) > cols {
 				t.Fatalf("width %d name %q: invalid segment %q", cols, name, segment)
 			}
-			if cols >= 4 && (!strings.HasPrefix(segment, " [") || !strings.Contains(segment, "]")) {
+			if cols >= 2 && (!strings.HasPrefix(segment, "[") || !strings.HasSuffix(segment, "]")) {
 				t.Fatalf("truncated highlight lost brackets: %q", segment)
 			}
 		}
@@ -120,5 +120,34 @@ func TestTabSegmentsFitUnicodeAndNarrowViewports(t *testing.T) {
 	state.ActiveTab = 2
 	if row := tabVisibilityRow(t, state, 16); !strings.Contains(row, "last") {
 		t.Fatalf("wide preceding name hid active tab: %q", row)
+	}
+}
+
+func TestTabHighlightPreservesLabelAndNeighborColumns(t *testing.T) {
+	state := NewRuntime().Read()
+	state.Tabs = []Tab{{ID: "a", Title: "alpha"}, {ID: "b", Title: "beta"}, {ID: "c", Title: "gamma"}}
+	// All three tabs exactly fill the row. Highlight must not cause a scroll.
+	state.ActiveTab = 2
+	before := tabVisibilityRow(t, state, 20)
+	for _, candidate := range state.Tabs {
+		state.Search = SearchState{Visible: true, CandidateID: candidate.ID}
+		after := tabVisibilityRow(t, state, 20)
+		for _, tab := range state.Tabs {
+			if want, got := strings.Index(before, tab.Title), strings.Index(after, tab.Title); want < 0 || want != got {
+				t.Fatalf("highlight %s shifted %s: %d -> %d\nbefore %q\nafter %q", candidate.Title, tab.Title, want, got, before, after)
+			}
+		}
+		if !strings.Contains(after, "["+candidate.Title+"]") {
+			t.Fatal(after)
+		}
+	}
+	for _, title := range []string{"日本語", "räv 🦊", "long-session-name"} {
+		for cols := 2; cols <= 24; cols++ {
+			plain := tabSegment(Tab{Title: title}, cols)
+			highlight := tabSegment(Tab{Title: title, Highlighted: true}, cols)
+			if plain[1:len(plain)-1] != highlight[1:len(highlight)-1] || runewidth.StringWidth(plain) != runewidth.StringWidth(highlight) {
+				t.Fatalf("width %d: highlight changed title or width: %q -> %q", cols, plain, highlight)
+			}
+		}
 	}
 }
