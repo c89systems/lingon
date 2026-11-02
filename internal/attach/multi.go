@@ -41,7 +41,7 @@ type MultiClient struct {
 	RequestControl bool
 	// Restore keeps remote viewport dimensions and requests a matching local window.
 	Restore bool
-	// Cols and Rows explicitly size the local window and remote viewport. Restore takes precedence.
+	// Cols and Rows initialize the selected viewport before per-session Restore.
 	Cols, Rows                  int
 	HostnameOnly                bool
 	SessionID                   string
@@ -869,6 +869,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			Clock:                       m.Clock,
 			Trace:                       m.Trace,
 			DesktopNotifier:             m.DesktopNotifier,
+		}
+		if visible {
+			geometry.bindInitialSession(session.ID)
 		}
 		if localSessionMode {
 			client.OnRoutedHeadlessStatus = func(wall *protocolpb.Wall) {

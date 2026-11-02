@@ -17,7 +17,7 @@ import (
 	"pkt.systems/lingon/internal/terminal"
 )
 
-func TestGeometryResolutionAndRestorePrecedence(t *testing.T) {
+func TestGeometryResolutionWithRestore(t *testing.T) {
 	for _, tc := range []struct {
 		cols, rows int
 		restore    bool
@@ -28,8 +28,10 @@ func TestGeometryResolutionAndRestorePrecedence(t *testing.T) {
 		{100, 0, false, terminal.WindowSize{Cols: 100, Rows: 24}, false},
 		{0, 50, false, terminal.WindowSize{Cols: 80, Rows: 50}, false},
 		{0, 0, false, terminal.WindowSize{}, false},
-		{100, 50, true, terminal.WindowSize{}, false},
-		{-1, -1, true, terminal.WindowSize{}, false},
+		{100, 50, true, terminal.WindowSize{Cols: 100, Rows: 50}, false},
+		{100, 0, true, terminal.WindowSize{Cols: 100, Rows: 24}, false},
+		{0, 50, true, terminal.WindowSize{Cols: 80, Rows: 50}, false},
+		{-1, -1, true, terminal.WindowSize{}, true},
 		{-1, 50, false, terminal.WindowSize{}, true},
 	} {
 		g, err := newClientGeometry(tc.cols, tc.rows, 80, 24, tc.restore)
@@ -38,7 +40,11 @@ func TestGeometryResolutionAndRestorePrecedence(t *testing.T) {
 		}
 		var got terminal.WindowSize
 		if g != nil {
-			got = g.request.Pending()
+			if g.restoreSeed != nil {
+				got = g.restoreSeed.size
+			} else {
+				got = g.request.Pending()
+			}
 		}
 		if got != tc.want {
 			t.Fatalf("%+v: got %v", tc, got)

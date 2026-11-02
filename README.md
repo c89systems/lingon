@@ -361,9 +361,12 @@ keep their own dimensions. Acknowledging Lingon's window request does not resize
 the remote session. Turning restoration off resumes the usual resize policy:
 remote headless sessions follow the local viewport; interactive hosts retain
 their own size.
-`--restore` takes precedence over geometry, `--cols` and `--rows`, ignoring
-them entirely. After toggling restoration off, an attachment started with
-explicit geometry can again resize interactive remote hosts.
+When combined with `--restore`, geometry, `--cols` and `--rows` initialize the
+initially selected remote session first. Lingon waits for its resized grid, then
+restores the local window to that size and continues as an ordinary restore
+session. Other tabs retain their own dimensions; the startup geometry is not
+reapplied when switching back. `--geometry` still overrides `--cols`/`--rows`,
+and an unspecified or zero axis uses the initial local terminal size.
 
 The request is the xterm window operation `CSI 8 ; rows ; columns t`, in character
 cells. Lingon checks the resulting local size and warns if it still differs;
@@ -416,8 +419,8 @@ Attach options (selection):
 - `--access-token` access token for authenticated attach
 - `--request-control` request controller lease on connect
 - `-r, --restore` restore each selected session's window size; manual resizing updates that session
-- `-g, --geometry COLSxROWS` resize the local terminal and remote session; ignored with `--restore`
-- `--cols`, `--rows` size individual dimensions (`0` uses local size); ignored with `--restore`
+- `-g, --geometry COLSxROWS` resize the local terminal and remote session; applied before `--restore`
+- `--cols`, `--rows` size individual dimensions (`0` uses local size); applied before `--restore`
 - `--pick` interactively pick a session
 - `--hostname-only` show hostname-only connect/disconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)

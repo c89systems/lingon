@@ -193,7 +193,11 @@ func TestAttachGeometryFlagsAndPrecedence(t *testing.T) {
 		{[]string{"--cols", "100"}, 100, 0, false},
 		{[]string{"--rows", "50"}, 0, 50, false},
 		{[]string{"--cols", "100", "--rows", "50"}, 100, 50, false},
-		{[]string{"-r", "-g", "bad", "--cols", "-1", "--rows", "-1"}, 0, 0, false},
+		{[]string{"-r", "-g", "100x50", "--cols", "9", "--rows", "8"}, 100, 50, false},
+		{[]string{"--restore", "--cols", "100"}, 100, 0, false},
+		{[]string{"-r", "--rows", "50"}, 0, 50, false},
+		{[]string{"-r", "-g", "bad"}, 0, 0, true},
+		{[]string{"-r", "--cols", "-1"}, 0, 0, true},
 		{[]string{"-g", "bad"}, 0, 0, true},
 		{[]string{"--cols", "-1"}, 0, 0, true},
 	} {
@@ -207,8 +211,7 @@ func TestAttachGeometryFlagsAndPrecedence(t *testing.T) {
 		}
 		cols, _ := cmd.Flags().GetInt("cols")
 		rows, _ := cmd.Flags().GetInt("rows")
-		restore, _ := cmd.Flags().GetBool("restore")
-		cols, rows, err = resolveAttachSize(cmd, cols, rows, restore)
+		cols, rows, err = resolveAttachSize(cmd, cols, rows)
 		if (err != nil) != tc.invalid || cols != tc.cols || rows != tc.rows {
 			t.Fatalf("%v: %dx%d %v", tc.args, cols, rows, err)
 		}

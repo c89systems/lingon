@@ -12,10 +12,7 @@ import (
 
 const geometryFlagName = "geometry"
 
-func resolveAttachSize(cmd *cobra.Command, cols, rows int, restore bool) (int, int, error) {
-	if restore {
-		return 0, 0, nil
-	}
+func resolveAttachSize(cmd *cobra.Command, cols, rows int) (int, int, error) {
 	cols, rows, err := resolveRootHostSize(cmd, cols, rows)
 	if err != nil {
 		return 0, 0, err

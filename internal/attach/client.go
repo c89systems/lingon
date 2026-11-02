@@ -62,7 +62,7 @@ type Client struct {
 	RequestControl bool
 	// Restore requests that the local terminal follow remote viewport dimensions.
 	Restore bool
-	// Cols and Rows explicitly size the local window and remote viewport. Restore takes precedence.
+	// Cols and Rows size the initial viewport before Restore follows session sizes.
 	Cols, Rows   int
 	HostnameOnly bool
 	TLSDir       string
@@ -313,6 +313,7 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 			return err
 		}
 	}
+	c.geometry.bindInitialSession(c.SessionID)
 
 	dialOptions := &websocket.DialOptions{HTTPClient: &http.Client{}}
 	if c.UnixSocket != "" {
@@ -2216,7 +2217,7 @@ func (c *Client) writeFrame(ctx context.Context, ws *websocket.Conn, frame *prot
 			frame.GetHello().Cols, frame.GetHello().Rows = 0, 0
 		}
 	}
-	if !c.restoreEnabled() && c.geometry != nil && frame.GetResize() != nil {
+	if !c.restoreEnabled() && c.geometry != nil && c.geometry.restoreSeed == nil && frame.GetResize() != nil {
 		cols, rows := c.terminalSize()
 		cols, rows = c.geometrySize(cols, rows)
 		frame = proto.Clone(frame).(*protocolpb.Frame)

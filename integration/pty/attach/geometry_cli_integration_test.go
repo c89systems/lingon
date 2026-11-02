@@ -57,7 +57,10 @@ func TestGeometryHostAndAttachCLI(t *testing.T) {
 		{"host-dimensions", false, []string{"--cols", "100", "--rows", "50"}, 100, 50},
 		{"attach-geometry", true, []string{"-g", "100x50"}, 100, 50},
 		{"attach-dimensions", true, []string{"--cols", "100", "--rows", "50"}, 100, 50},
-		{"attach-restore-precedence", true, []string{"-r", "-g", "invalid", "--cols", "120", "--rows", "60"}, 100, 30},
+		{"attach-geometry-then-restore", true, []string{"-r", "-g", "100x50", "--cols", "120", "--rows", "60"}, 100, 50},
+		{"attach-dimensions-then-restore", true, []string{"-r", "--cols", "100", "--rows", "50"}, 100, 50},
+		{"attach-cols-then-restore", true, []string{"--restore", "--cols", "100"}, 100, 24},
+		{"attach-rows-then-restore", true, []string{"-r", "--rows", "50"}, 80, 50},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := shortHomeDir(t)

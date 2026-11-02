@@ -102,7 +102,7 @@ func waitGeometrySnapshot(t *testing.T, recorder *ptytest.WSRecorder, id string,
 	}
 }
 
-func TestAttachGeometryPartialDimensionsAndRestorePrecedence(t *testing.T) {
+func TestAttachGeometryPartialDimensionsAndRestoreStartup(t *testing.T) {
 	for _, multi := range []bool{false, true} {
 		for _, tc := range []struct {
 			size       terminal.WindowSize
@@ -111,7 +111,9 @@ func TestAttachGeometryPartialDimensionsAndRestorePrecedence(t *testing.T) {
 		}{
 			{terminal.WindowSize{Cols: 100}, false, 100, 24},
 			{terminal.WindowSize{Rows: 50}, false, 80, 50},
-			{terminal.WindowSize{Cols: 100, Rows: 50}, true, 90, 30},
+			{terminal.WindowSize{Cols: 100, Rows: 50}, true, 100, 50},
+			{terminal.WindowSize{Cols: 100}, true, 100, 24},
+			{terminal.WindowSize{Rows: 50}, true, 80, 50},
 		} {
 			t.Run(fmt.Sprintf("multi=%v/%s/restore=%v", multi, fmtGeometry(tc.size), tc.restore), func(t *testing.T) {
 				recorder := ptytest.NewWSRecorder()
@@ -130,9 +132,6 @@ func TestAttachGeometryPartialDimensionsAndRestorePrecedence(t *testing.T) {
 				waitRestoreRequest(t, client, tc.cols, tc.rows)
 				client.Send("partial\r")
 				waitSearchScreen(t, client, func(s ptytest.Screen) bool { return s.Contains(fmtReply("partial", tc.cols, tc.rows)) })
-				if tc.restore {
-					assertNoRestorePropagation(t, recorder)
-				}
 			})
 		}
 	}

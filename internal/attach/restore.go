@@ -34,7 +34,8 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 	if size == c.restoreManual || c.isViewOnly() {
 		c.restoreManual = terminal.WindowSize{}
 	}
-	if !c.restoreEnabled() || c.stdoutWriter() == io.Discard {
+	geometryPending := c.restoreGeometryPending(size)
+	if !c.restoreEnabled() || c.stdoutWriter() == io.Discard || geometryPending {
 		return
 	}
 	cols, rows := size.Cols, size.Rows
@@ -112,6 +113,7 @@ func (c *Client) processTerminalResize(ctx context.Context, allowNormal bool) er
 			c.restoreRequest = restoreRequest{}
 			c.restoreLocal = actual
 		} else if c.restoreLocal != actual {
+			c.cancelRestoreGeometry()
 			c.restoreInitialized = true
 			c.restoreRequest = restoreRequest{}
 			c.restoreLocal = actual

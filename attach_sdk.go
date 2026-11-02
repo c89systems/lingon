@@ -27,7 +27,8 @@ type AttachOptions struct {
 	ShareToken        string
 	RequestControl    bool
 	// Cols and Rows request a local and remote viewport; zero dimensions use the
-	// current local size. Restore takes precedence over both dimensions.
+	// current local size. With Restore, geometry initializes the selected remote
+	// session first, then ordinary per-session restoration takes over.
 	Cols, Rows int
 	// Restore matches the selected session's viewport on entry/tab switching.
 	// Manual window resizing updates only that remote session.

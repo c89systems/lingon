@@ -45,7 +45,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 		Short:   "Attach to a Lingon session",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			colsValue, rowsValue, err := resolveAttachSize(cmd, cols, rows, restore)
+			colsValue, rowsValue, err := resolveAttachSize(cmd, cols, rows)
 			if err != nil {
 				return err
 			}
@@ -266,9 +266,9 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.IntVar(&cols, "cols", 0, "resize local terminal and remote session columns (0 keeps the local width; ignored with --restore)")
-	flags.IntVar(&rows, "rows", 0, "resize local terminal and remote session rows (0 keeps the local height; ignored with --restore)")
-	flags.StringP(geometryFlagName, "g", "", "resize local terminal and remote session to COLSxROWS (overrides --cols/--rows; ignored with --restore)")
+	flags.IntVar(&cols, "cols", 0, "resize local terminal and remote session columns (0 keeps the local width; applied before --restore)")
+	flags.IntVar(&rows, "rows", 0, "resize local terminal and remote session rows (0 keeps the local height; applied before --restore)")
+	flags.StringP(geometryFlagName, "g", "", "resize local terminal and remote session to COLSxROWS (overrides --cols/--rows; applied before --restore)")
 	flags.BoolVarP(&restore, "restore", "r", false, "restore each session's window size; manual resizing updates that session (Ctrl+L ! toggles)")
 	flags.StringVarP(&endpoint, "endpoint", "e", lingon.DefaultClientEndpoint, "relay endpoint (https/wss base URL; assumes https:// if omitted)")
 	flags.StringVarP(&shareToken, "token", "t", "", "share token for anonymous attach")
