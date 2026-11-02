@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/benbjohnson/clock v1.3.5
-	github.com/chromedp/cdproto v0.158.0
-	github.com/chromedp/chromedp v0.21.0
+	github.com/chromedp/cdproto v0.159.0
+	github.com/chromedp/chromedp v0.21.1
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/godbus/dbus/v5 v5.2.4
@@ -15,7 +15,7 @@ require (
 	github.com/pquerna/otp v1.5.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 	golang.design/x/x11 v0.2.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
@@ -41,7 +41,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	pkt.systems/jpact v0.1.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
