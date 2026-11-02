@@ -17,13 +17,22 @@ import (
 
 type searchInputClock struct {
 	*clock.MockClock
-	inputTimer chan struct{}
+	inputTimer  chan struct{}
+	escapeTimer chan struct{}
 }
 
 func (c *searchInputClock) NewTimer(d time.Duration) *clock.Timer {
 	timer := c.MockClock.NewTimer(d)
 	if d == 50*time.Millisecond {
 		c.inputTimer <- struct{}{}
+	}
+	return timer
+}
+
+func (c *searchInputClock) AfterFunc(d time.Duration, f func()) *clock.Timer {
+	timer := c.MockClock.AfterFunc(d, f)
+	if d == 50*time.Millisecond {
+		c.escapeTimer <- struct{}{}
 	}
 	return timer
 }
@@ -48,7 +57,7 @@ func TestSearchWhileWaitingForFirstSnapshot(t *testing.T) {
 	served := make(chan struct{})
 	go func() { defer close(served); _ = server.Serve(listener) }()
 	t.Cleanup(func() { cancel(); _ = server.Close(); <-served })
-	clk := &searchInputClock{MockClock: clock.NewMock(), inputTimer: make(chan struct{}, 1)}
+	clk := &searchInputClock{MockClock: clock.NewMock(), inputTimer: make(chan struct{}, 1), escapeTimer: make(chan struct{}, 1)}
 	h := ptytest.New(t, ptytest.WithClock(clk))
 	terminal := h.StartMultiAttach(ptytest.MultiAttachOptions{
 		Endpoint: "local://headless", SessionID: "alpha", Cols: 80, Rows: 24, Restore: true,
@@ -77,6 +86,14 @@ func TestSearchWhileWaitingForFirstSnapshot(t *testing.T) {
 		clk.Add(50 * time.Millisecond)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Escape parser did not arm its timer")
+	}
+	// Wait for search disambiguation to arm after the mouse filter flushes ESC.
+	// Advance only once registration is proven; no scheduler-dependent sleeps.
+	select {
+	case <-clk.escapeTimer:
+		clk.Add(50 * time.Millisecond)
+	case <-time.After(3 * time.Second):
+		t.Fatal("search Escape parser did not arm its timer")
 	}
 	wait(func(s ptytest.Screen) bool {
 		return !strings.HasPrefix(s.Row(23), "/ ") && s.Contains("loading local headless")

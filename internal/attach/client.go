@@ -2261,6 +2261,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 	prefill := make([]byte, 0, 1024)
 	var prefix control.Prefix
 	var search control.SearchPrompt
+	defer search.Close()
 	searchSessions := func() []control.SearchSession {
 		name := c.SessionID
 		state := c.readCompositorState()
@@ -2269,10 +2270,17 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		}
 		return []control.SearchSession{{ID: c.SessionID, Name: name}}
 	}
+	// Serialize timer and input redraws so an older view cannot hide a new search.
+	var searchRenderMu sync.Mutex
 	showSearch := func() {
+		searchRenderMu.Lock()
+		defer searchRenderMu.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
 		items := searchSessions()
-		text, ghost := search.Display(items)
-		c.renderSearch(mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost, CandidateID: search.CandidateID(items)})
+		view := search.View(items)
+		c.renderSearch(mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
 	}
 	pending := make([]byte, 0, 2048)
 	var scrollState scrollInputState
@@ -2314,13 +2322,14 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 			return true
 		}
 		processNormalByte := func(b byte) bool {
-			if search.DiscardEscapeTail(b) {
-				return true
-			}
-			if search.Active {
-				search.Feed(b, searchSessions())
-				showSearch()
-				return true
+			if search.HandlesInput() {
+				result := search.Feed(b, searchSessions())
+				if result.Changed {
+					showSearch()
+				}
+				if result.Consumed {
+					return true
+				}
 			}
 			helpVisible := c.helpVisible()
 			if action, ok := mvu.ActionForHelpDismissKey(helpVisible, b); ok {
@@ -2346,7 +2355,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 				}
 				switch action {
 				case control.ActionSearch:
-					search.Begin(c.clock())
+					search.Begin(c.clock(), showSearch)
 					showSearch()
 					return true
 				case control.ActionToggleRestore:

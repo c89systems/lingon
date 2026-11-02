@@ -529,6 +529,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 		}
 		var rename control.RenamePrompt
 		var search control.SearchPrompt
+		defer search.Close()
 		searchSessions := func() []control.SearchSession {
 			current := r.combinedSessions()
 			items := make([]control.SearchSession, 0, len(current))
@@ -537,10 +538,17 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 			}
 			return items
 		}
+		// Serialize timer and input redraws so an older view cannot hide a new search.
+		var searchRenderMu sync.Mutex
 		showSearch := func() {
+			searchRenderMu.Lock()
+			defer searchRenderMu.Unlock()
+			if sigCtx.Err() != nil {
+				return
+			}
 			items := searchSessions()
-			text, ghost := search.Display(items)
-			r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost, CandidateID: search.CandidateID(items)}})
+			view := search.View(items)
+			r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID}})
 			r.forceRedraw(stdout)
 		}
 		pending := make([]byte, 0, 4096)
@@ -642,20 +650,21 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 				return true
 			}
 			processNormalByte := func(b byte) bool {
-				if search.DiscardEscapeTail(b) {
-					return true
-				}
-				if search.Active {
-					id, done := search.Feed(b, searchSessions())
-					showSearch()
-					if done && id != "" {
+				if search.HandlesInput() {
+					result := search.Feed(b, searchSessions())
+					if result.Changed {
+						showSearch()
+					}
+					if id := result.SessionID; id != "" {
 						if r.isLocalSession(id) {
 							r.activateLocalSession(id, stdout, stdin)
 						} else if err := r.activateRemote(sigCtx, id, stdout, stdin); err != nil {
 							r.showErrorStatus(err.Error(), stdout, 3*time.Second)
 						}
 					}
-					return true
+					if result.Consumed {
+						return true
+					}
 				}
 				if rename.DiscardEscapeTail(b) {
 					return true
@@ -704,7 +713,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 					r.setTabSuppressed(activeID, false)
 					switch action {
 					case control.ActionSearch:
-						search.Begin(r.clock)
+						search.Begin(r.clock, showSearch)
 						showSearch()
 						return true
 					case control.ActionHelp:

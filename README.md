@@ -321,8 +321,10 @@ field at the bottom left. Type a case-sensitive session-name prefix; the rest
 of the suggested name appears in gray. Enter accepts the suggestion and opens
 that exact session. Tab first fills the suggestion; further Tab presses cycle
 through session names in tab order, wrapping at the end. Tab on an empty field
-starts with the first tab. An exact typed name takes precedence over longer
-prefix matches. Duplicate names remain separate selectable sessions.
+starts with the first tab. Shift+Tab cycles in reverse, wrapping from the first
+tab to the last; on an empty field it starts with the last tab. Like Tab, it
+first fills an incomplete suggestion. An exact typed name takes precedence
+over longer prefix matches. Duplicate names remain separate selectable sessions.
 
 Search keeps the current session active until Enter. Escape or Ctrl+C cancels;
 Backspace edits the prefix. Enter with no matching session leaves the field

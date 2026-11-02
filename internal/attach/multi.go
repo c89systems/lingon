@@ -1918,6 +1918,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 	}()
 	var rename control.RenamePrompt
 	var search control.SearchPrompt
+	defer search.Close()
 	searchSessions := func() []control.SearchSession {
 		mu.Lock()
 		defer mu.Unlock()
@@ -1927,10 +1928,17 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		return items
 	}
+	// Serialize timer and input redraws so an older view cannot hide a new search.
+	var searchRenderMu sync.Mutex
 	showSearch := func() {
+		searchRenderMu.Lock()
+		defer searchRenderMu.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
 		items := searchSessions()
-		text, ghost := search.Display(items)
-		state := mvu.SearchState{Visible: search.Active, Text: text, Ghost: ghost, CandidateID: search.CandidateID(items)}
+		view := search.View(items)
+		state := mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID}
 		_, client, _, _, _ := activeViewSnapshot()
 		if client != nil {
 			client.renderSearch(state)
@@ -2155,16 +2163,17 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		processNormalByte := func(b byte) bool {
 			_, client, _, _, _ := activeViewSnapshot()
-			if search.DiscardEscapeTail(b) {
-				return true
-			}
-			if search.Active {
-				id, done := search.Feed(b, searchSessions())
-				showSearch()
-				if done && id != "" {
+			if search.HandlesInput() {
+				result := search.Feed(b, searchSessions())
+				if result.Changed {
+					showSearch()
+				}
+				if id := result.SessionID; id != "" {
 					_ = activateView(id)
 				}
-				return true
+				if result.Consumed {
+					return true
+				}
 			}
 			if rename.DiscardEscapeTail(b) {
 				return true
@@ -2223,7 +2232,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					}
 					return true
 				case control.ActionSearch:
-					search.Begin(m.Clock)
+					search.Begin(m.Clock, showSearch)
 					showSearch()
 					return true
 				case control.ActionHelp:
