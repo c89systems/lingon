@@ -108,6 +108,7 @@ type Client struct {
 
 	mu                        sync.RWMutex
 	restoreMode               *atomic.Bool
+	restoreOnce               sync.Once
 	geometry                  *clientGeometry
 	restoreRequest            restoreRequest // protected by renderMu
 	restoreInitialized        bool
@@ -224,9 +225,7 @@ func (c *Client) RunDetached(ctx context.Context) error {
 }
 
 func (c *Client) run(ctx context.Context, opts runOptions) error {
-	if c.restoreMode == nil {
-		c.restoreMode = newRestoreMode(c.Restore)
-	}
+	c.restoreState()
 	if c.Logger == nil {
 		c.Logger = logging.Default()
 	}

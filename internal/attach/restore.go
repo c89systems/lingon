@@ -15,7 +15,19 @@ import (
 type restoreRequest struct{ cols, rows, localCols, localRows int }
 
 func (c *Client) restoreEnabled() bool {
-	return c.restoreMode != nil && c.restoreMode.Load()
+	return c.restoreState().Load()
+}
+
+// restoreState may be called by host render callbacks before Run starts. Both
+// paths must initialize through the same barrier; a supplied multi-attach mode
+// stays shared across clients.
+func (c *Client) restoreState() *atomic.Bool {
+	c.restoreOnce.Do(func() {
+		if c.restoreMode == nil {
+			c.restoreMode = newRestoreMode(c.Restore)
+		}
+	})
+	return c.restoreMode
 }
 
 func newRestoreMode(enabled bool) *atomic.Bool {
@@ -86,8 +98,9 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 }
 
 func (c *Client) toggleRestore() bool {
-	enabled := !c.restoreMode.Load()
-	c.restoreMode.Store(enabled)
+	mode := c.restoreState()
+	enabled := !mode.Load()
+	mode.Store(enabled)
 	if enabled && c.geometry != nil {
 		c.geometry.request.Set(terminal.WindowSize{})
 	}
