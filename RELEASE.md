@@ -218,7 +218,7 @@ The release reference is `docker.io/pktsystems/lingon:vX.Y.Z`.
 
 Run `make publish` only when publication of the selected release is authorized.
 Preparation itself never pushes. GitHub CLI and Docker Hub authentication must
-already be configured. `origin` must target `github.com/sa6mwa/lingon`.
+already be configured. `origin` must target `github.com/c89systems/lingon`.
 
 Enable GitHub release immutability once in the repository settings; publication
 checks it before any push and never changes settings implicitly. The GitHub
