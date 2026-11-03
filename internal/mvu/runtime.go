@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/render"
 )
@@ -148,10 +150,6 @@ func RenderHost(in HostRenderInput) (HostRenderOutput, error) {
 	if in.Frame.LastSnapRows > 0 && in.Frame.LastSnapRows != int(composed.Rows) {
 		clear = true
 	}
-	if (in.Frame.LastRenderCols > 0 || in.Frame.LastRenderRows > 0 || in.Frame.LastSnapCols > 0 || in.Frame.LastSnapRows > 0) &&
-		in.Frame.LastScrollback != resolved.ScrollbackVisible {
-		clear = true
-	}
 	if clear {
 		prev = nil
 	}
@@ -209,8 +207,7 @@ func RenderAttach(in AttachRenderInput) (AttachRenderOutput, error) {
 	prev := in.PrevSnapshot
 	clear := in.Frame.LastRenderCols == 0 || in.Frame.LastRenderRows == 0 ||
 		in.Frame.LastRenderCols != in.Cols || in.Frame.LastRenderRows != in.Rows ||
-		in.Frame.LastSnapCols != int(composed.Cols) || in.Frame.LastSnapRows != int(composed.Rows) ||
-		in.Frame.LastScrollback != in.ScrollbackVisible
+		in.Frame.LastSnapCols != int(composed.Cols) || in.Frame.LastSnapRows != int(composed.Rows)
 	if clear {
 		prev = nil
 	}
@@ -264,6 +261,9 @@ func renderSnapshot(w io.Writer, prev, snap *protocolpb.Snapshot, cols, rows int
 	cursor = searchCursor(resolved.State.Search, cols, rows, cursor)
 	if forceClear {
 		return render.SnapshotViewport(w, snap, cols, rows)
+	}
+	if resolved.ScrollbackVisible && prev != nil && proto.Equal(prev, snap) {
+		return nil
 	}
 	bannerOwns := bannerRowOwned(resolved, top.BannerOwnsRow)
 	topRowOwned := resolved.TabBarVisible || bannerOwns

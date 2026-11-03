@@ -127,6 +127,8 @@ type Client struct {
 	scrollbackMu              sync.RWMutex
 	scrollbackBuffer          *mvu.ProtoScrollbackBuffer
 	scrollbackView            mvu.ScrollbackViewport
+	scrollbackLive            *protocolpb.Snapshot // immutable grid aligned with scrollbackBuffer
+	scrollbackPending         int                  // rows received since the canonical live frame
 	renderMu                  sync.Mutex
 	writeMu                   sync.Mutex
 	renderReqMu               sync.Mutex
@@ -920,7 +922,13 @@ func (c *Client) ForceTabsVisibleOnce() {
 func (c *Client) RenderCurrentFull() {
 	c.renderMu.Lock()
 	defer c.renderMu.Unlock()
-	c.renderCache.Reset()
+	c.scrollbackMu.Lock()
+	c.syncScrollbackLocked()
+	visible := c.scrollbackView.Visible()
+	c.scrollbackMu.Unlock()
+	if !visible {
+		c.renderCache.Reset()
+	}
 	c.forceClear = false
 	c.renderSnapshotLocked(c.snapshotOrBlank())
 }
@@ -1107,23 +1115,73 @@ func (c *Client) handleScrollback(scrollback *protocolpb.Scrollback) {
 	if scrollback == nil {
 		return
 	}
-	snapshotRows := c.renderSnapshotRows()
 	c.scrollbackMu.Lock()
 	if c.scrollbackBuffer == nil {
 		c.scrollbackBuffer = mvu.NewProtoScrollbackBuffer(config.DefaultScrollbackLines)
 	}
+	before := c.scrollbackBuffer.Position()
 	c.scrollbackBuffer.Apply(scrollback)
-	viewRows := c.scrollbackViewRows()
-	if viewRows <= 0 {
-		viewRows = snapshotRows
+	after := c.scrollbackBuffer.Position()
+	if after.Generation != before.Generation {
+		c.scrollbackPending = 0
+	} else {
+		c.scrollbackPending += after.End - before.End
 	}
-	if viewRows <= 0 {
-		viewRows = config.DefaultTerminalRows
+	if c.scrollbackView.Active() {
+		if after.Generation != before.Generation {
+			c.scrollbackLive = c.snapshotOrBlank()
+		} else {
+			c.scrollbackLive = shiftScrollbackLive(c.scrollbackLive, after.End-before.End)
+		}
+		c.syncScrollbackLocked()
 	}
-	totalRows := c.scrollbackBuffer.Len() + snapshotRows
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
-	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	c.scrollbackMu.Unlock()
+}
+
+func (c *Client) syncScrollbackLocked() {
+	snap := c.scrollbackLive
+	if snap == nil || !c.scrollbackView.Active() {
+		return
+	}
+	cols, rows := c.terminalSize()
+	if cols <= 0 {
+		cols = int(snap.Cols)
+	}
+	if rows <= 0 {
+		rows = int(snap.Rows)
+	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(c.scrollbackBuffer.Len()+int(snap.Rows), rows, protoScrollbackContentWidth(c.scrollbackBuffer.Rows(), snap), cols)
+}
+
+func (c *Client) updateScrollbackSnapshotLocked() {
+	c.scrollbackPending = 0
+	if c.scrollbackView.Active() {
+		c.scrollbackLive = c.snapshotOrBlank()
+		c.syncScrollbackLocked()
+	}
+}
+
+// A history message precedes its live frame. Shift a separate immutable copy
+// so pinned live rows retain their coordinates without altering normal diffs.
+func shiftScrollbackLive(snap *protocolpb.Snapshot, rows int) *protocolpb.Snapshot {
+	if snap == nil || rows <= 0 {
+		return snap
+	}
+	next := cloneSnapshot(snap)
+	count := rows * int(snap.Cols)
+	shiftScrollbackCells(next.Runes, count)
+	shiftScrollbackCells(next.Modes, count)
+	shiftScrollbackCells(next.Fg, count)
+	shiftScrollbackCells(next.Bg, count)
+	shiftScrollbackCells(next.Graphemes, count)
+	return next
+}
+
+func shiftScrollbackCells[T any](cells []T, count int) {
+	count = min(count, len(cells))
+	copy(cells, cells[count:])
+	clear(cells[len(cells)-count:])
 }
 
 func (c *Client) setScrollbackActive(active bool) {
@@ -1131,10 +1189,12 @@ func (c *Client) setScrollbackActive(active bool) {
 	defer c.scrollbackMu.Unlock()
 	if !active {
 		c.scrollbackView.SetActive(false)
+		c.scrollbackLive = nil
 		c.setScrollbackMouseActive(false)
 		return
 	}
 	snap := c.snapshotOrBlank()
+	c.scrollbackLive = shiftScrollbackLive(snap, c.scrollbackPending)
 	viewCols, viewRows := c.terminalSize()
 	if viewCols <= 0 {
 		viewCols = int(snap.Cols)
@@ -1150,10 +1210,7 @@ func (c *Client) setScrollbackActive(active bool) {
 	}
 	contentCols := protoScrollbackContentWidth(scrollRows, snap)
 	colOffset, liveOriginRow := render.ViewportOriginForSnapshot(snap, viewCols, viewRows)
-	rowOffset := int(snap.Rows) - viewRows - liveOriginRow
-	if rowOffset < 0 {
-		rowOffset = 0
-	}
+	rowOffset := max(0, int(snap.Rows)-viewRows-liveOriginRow) + c.scrollbackPending
 	c.scrollbackView.EnterAt(totalRows, viewRows, rowOffset, contentCols, viewCols, colOffset)
 	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.setScrollbackMouseActive(true)
@@ -1244,6 +1301,7 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	if snap == nil {
 		return
 	}
+	c.scrollbackMu.Lock()
 	c.mu.Lock()
 	c.lastSnapshot = snap
 	if seq != 0 {
@@ -1253,9 +1311,14 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.resyncRequested = false
 	c.forceFreshHello = false
 	c.mu.Unlock()
-	c.renderMu.Lock()
-	c.renderCache.Reset()
-	c.renderMu.Unlock()
+	c.updateScrollbackSnapshotLocked()
+	visible := c.scrollbackView.Visible()
+	c.scrollbackMu.Unlock()
+	if !visible {
+		c.renderMu.Lock()
+		c.renderCache.Reset()
+		c.renderMu.Unlock()
+	}
 	c.requestRenderCurrent()
 	c.markReady()
 }
@@ -1274,8 +1337,13 @@ func (c *Client) Snapshot() *protocolpb.Snapshot {
 }
 
 func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
+	c.scrollbackMu.Lock()
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer func() {
+		c.mu.Unlock()
+		c.updateScrollbackSnapshotLocked()
+		c.scrollbackMu.Unlock()
+	}()
 
 	if diff == nil {
 		return c.lastSnapshot
@@ -1372,29 +1440,27 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 		cols, rows = int(snap.Cols), int(snap.Rows)
 	}
 	c.scrollbackMu.Lock()
+	if c.scrollbackView.Active() && c.scrollbackLive != nil {
+		snap = c.scrollbackLive
+	}
 	var scrollRows []*protocolpb.ScrollbackRow
 	if c.scrollbackBuffer != nil {
 		scrollRows = c.scrollbackBuffer.Rows()
 	}
 	totalRows := len(scrollRows) + int(snap.Rows)
-	contentCols := protoScrollbackContentWidth(scrollRows, snap)
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
-	c.scrollbackView.Normalize(totalRows, rows, contentCols, cols)
-	scrollOffset := c.scrollbackView.Offset()
+	scrollOffset := c.scrollbackView.OffsetFor(c.scrollbackBuffer.Position())
 	scrollCol := c.scrollbackView.Column()
 	scrollActive := c.scrollbackView.Active()
 	scrollbackVisible := c.scrollbackView.Visible()
-	scrollPercent := c.scrollbackView.Percent(totalRows, rows)
+	scrollPercent := mvu.ScrollbackPercent(totalRows, rows, scrollOffset)
 	c.scrollbackMu.Unlock()
 	viewSnap := snap
 	if scrollActive || scrollOffset > 0 {
 		viewSnap = mvu.BuildScrollbackViewFromProto(cols, rows, scrollRows, snap, scrollOffset, scrollCol)
 	}
 	compositor := c.ensureCompositor()
-	if scrollbackVisible {
-		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: true, Percent: scrollPercent})
-	} else {
-		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: false})
+	if c.stdoutWriter() != io.Discard {
+		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: scrollbackVisible, Percent: scrollPercent})
 	}
 	if c.renderDisabled {
 		c.renderDisabledSnapshot(viewSnap)

@@ -7,6 +7,20 @@ type ScrollbackPosition struct {
 	End        int
 }
 
+// OffsetFor projects the stored anchor onto a history snapshot without mutating
+// the viewport. Output updates rebase the anchor; concurrent redraws may observe
+// committed history before its notification has run.
+func (v *ScrollbackViewport) OffsetFor(position ScrollbackPosition) int {
+	if v == nil {
+		return 0
+	}
+	offset := v.offset
+	if v.active && v.historyKnown && position.Generation == v.history.Generation {
+		offset += max(0, position.End-v.history.End)
+	}
+	return offset
+}
+
 // SyncHistory keeps the viewed rows in place as live output advances history.
 // The storage owner then calls Normalize to clamp an evicted anchor to retained
 // history. Inactive views continue to follow live output normally.

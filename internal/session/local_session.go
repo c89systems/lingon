@@ -66,6 +66,7 @@ type localSession struct {
 	scrollMu          sync.RWMutex
 	scroll            []terminal.ScrollbackRow
 	scrollEnd         int
+	scrollFrame       localScrollbackSnapshot
 	pending           []terminal.ScrollbackRow
 
 	holderMu sync.Mutex
@@ -499,6 +500,7 @@ func newLocalSession(parent context.Context, opts localSessionOptions) *localSes
 		}
 		session.preserved = cloneSnapshot(session.snapshot)
 	}
+	session.commitScrollbackFrame(session.snapshot)
 	session.setOscDefaults(opts.DefaultFg, opts.DefaultBg, opts.DefaultCursor)
 	session.clipboardHandler = clipboard.NewHandler(session.submitRemoteImage)
 	go session.runRemoteInput()
@@ -551,6 +553,29 @@ func (s *localSession) SetPublisher(p *publisher.Publisher) {
 type localScrollbackSnapshot struct {
 	rows []terminal.ScrollbackRow
 	end  int
+	live *protocolpb.Snapshot
+}
+
+// Rows are append-only and snapshots are immutable. Publish their association
+// together, after an output/resize transaction, for scrollback readers.
+func (s *localSession) commitScrollbackFrame(snap *protocolpb.Snapshot) {
+	s.scrollMu.Lock()
+	s.scrollFrame = localScrollbackSnapshot{rows: s.scroll, end: s.scrollEnd, live: snap}
+	s.scrollMu.Unlock()
+}
+
+func (s *localSession) scrollbackFrameState() localScrollbackSnapshot {
+	s.scrollMu.RLock()
+	state := s.scrollFrame
+	if state.live == nil {
+		state = localScrollbackSnapshot{rows: s.scroll, end: s.scrollEnd}
+	}
+	s.scrollMu.RUnlock()
+	if state.live == nil {
+		state.live = s.Snapshot()
+	}
+	state.rows = cloneScrollbackRows(state.rows)
+	return state
 }
 
 func (s *localSession) scrollbackSnapshot() []terminal.ScrollbackRow {
@@ -698,6 +723,9 @@ func (s *localSession) Resize(cols, rows int) (snapshot *protocolpb.Snapshot, re
 	s.outputMu.Lock()
 	defer s.outputMu.Unlock()
 	defer func() {
+		if resizeErr == nil && snapshot != nil {
+			s.commitScrollbackFrame(snapshot)
+		}
 		if resizeErr == nil && snapshot != nil && s.publisher != nil {
 			s.publisher.Resize(cols, rows, snapshot)
 		}
@@ -2443,6 +2471,7 @@ func (s *localSession) processPTYOutput(data []byte) error {
 		}
 	}
 	scrollRows = s.appendScrollback(s.drainScrollbackRows(scrollRows))
+	s.commitScrollbackFrame(snap)
 	if s.onOutput != nil {
 		s.onOutput(s.id, filtered, snap)
 	}
