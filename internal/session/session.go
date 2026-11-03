@@ -215,9 +215,10 @@ type Runner struct {
 	desktopNotifierOnce sync.Once
 	desktopNotifier     desktopnotify.Notifier
 
-	scrollbackMu      sync.Mutex
-	scrollbackView    mvu.ScrollbackViewport
-	scrollbackSession string
+	scrollbackRenderMu sync.Mutex
+	scrollbackMu       sync.Mutex
+	scrollbackView     mvu.ScrollbackViewport
+	scrollbackSession  string
 
 	wallNotifyMu            sync.Mutex
 	wallNotifyAfter         map[string]time.Duration
@@ -1004,9 +1005,10 @@ func (r *Runner) forceRedrawWithMode(stdout *os.File, forceFull bool) {
 }
 
 func (r *Runner) enterScrollback(sessionID string, stdout, stdin *os.File) {
-	totalRows, contentCols, cols, rows, rowOffset, colOffset := r.currentScrollbackAnchor(sessionID, stdout, stdin)
 	r.scrollbackMu.Lock()
-	r.scrollbackView.EnterAt(totalRows, rows, rowOffset, contentCols, cols, colOffset)
+	anchor := r.currentScrollbackAnchor(sessionID, stdout, stdin)
+	r.scrollbackView.EnterAt(anchor.totalRows, anchor.viewRows, anchor.rowOffset, anchor.contentCols, anchor.viewCols, anchor.colOffset)
+	r.scrollbackView.SyncHistory(anchor.history)
 	r.scrollbackSession = sessionID
 	r.scrollbackMu.Unlock()
 
@@ -1017,38 +1019,42 @@ func (r *Runner) enterScrollback(sessionID string, stdout, stdin *os.File) {
 	r.renderScrollback(stdout, stdin)
 }
 
-func (r *Runner) currentScrollbackAnchor(sessionID string, stdout, stdin *os.File) (totalRows, contentCols, viewCols, viewRows, rowOffset, colOffset int) {
-	viewCols = colsForViewport(stdout, stdin, nil)
-	viewRows = rowsForViewport(stdout, stdin, nil)
+type scrollbackAnchor struct {
+	totalRows, contentCols, viewCols, viewRows, rowOffset, colOffset int
+	history                                                          mvu.ScrollbackPosition
+}
+
+func (r *Runner) currentScrollbackAnchor(sessionID string, stdout, stdin *os.File) scrollbackAnchor {
+	anchor := scrollbackAnchor{viewCols: colsForViewport(stdout, stdin, nil), viewRows: rowsForViewport(stdout, stdin, nil)}
+	anchor.contentCols = anchor.viewCols
 	if activeID, isLocal := r.activeSession(); activeID == sessionID && !isLocal && r.remoteSessions != nil {
-		return 0, viewCols, viewCols, viewRows, 0, 0
+		return anchor
 	}
 	local := r.localSession(sessionID)
 	if local == nil {
-		return 0, viewCols, viewCols, viewRows, 0, 0
+		return anchor
 	}
 	snap := local.Snapshot()
 	if snap == nil {
-		return 0, viewCols, viewCols, viewRows, 0, 0
+		return anchor
 	}
-	if viewCols <= 0 {
-		viewCols = int(snap.Cols)
+	if anchor.viewCols <= 0 {
+		anchor.viewCols = int(snap.Cols)
 	}
-	if viewRows <= 0 {
-		viewRows = int(snap.Rows)
+	if anchor.viewRows <= 0 {
+		anchor.viewRows = int(snap.Rows)
 	}
-	scrollback := local.scrollbackSnapshot()
-	totalRows = len(scrollback) + int(snap.Rows)
-	contentCols = scrollbackContentWidthTerminal(scrollback, snap)
-	if contentCols <= 0 {
-		contentCols = int(snap.Cols)
+	history := local.scrollbackSnapshotState()
+	anchor.history = mvu.ScrollbackPosition{End: history.end}
+	anchor.totalRows = len(history.rows) + int(snap.Rows)
+	anchor.contentCols = scrollbackContentWidthTerminal(history.rows, snap)
+	if anchor.contentCols <= 0 {
+		anchor.contentCols = int(snap.Cols)
 	}
-	colOffset, liveOriginRow := render.ViewportOriginForSnapshot(snap, viewCols, viewRows)
-	rowOffset = int(snap.Rows) - viewRows - liveOriginRow
-	if rowOffset < 0 {
-		rowOffset = 0
-	}
-	return totalRows, contentCols, viewCols, viewRows, rowOffset, colOffset
+	colOffset, liveOriginRow := render.ViewportOriginForSnapshot(snap, anchor.viewCols, anchor.viewRows)
+	anchor.colOffset = colOffset
+	anchor.rowOffset = max(0, int(snap.Rows)-anchor.viewRows-liveOriginRow)
+	return anchor
 }
 
 func colsForViewport(stdout, stdin *os.File, snap *protocolpb.Snapshot) int {
@@ -1112,7 +1118,6 @@ func (r *Runner) scrollbackPage(delta int, stepRows int, stdout, stdin *os.File)
 	if local == nil {
 		return
 	}
-	scrollback := local.scrollbackSnapshot()
 	snap := local.Snapshot()
 	if snap == nil {
 		return
@@ -1127,9 +1132,12 @@ func (r *Runner) scrollbackPage(delta int, stepRows int, stdout, stdin *os.File)
 	if stepRows <= 0 {
 		stepRows = rows
 	}
+	r.scrollbackMu.Lock()
+	history := local.scrollbackSnapshotState()
+	scrollback := history.rows
 	totalRows := len(scrollback) + int(snap.Rows)
 	contentCols := scrollbackContentWidthTerminal(scrollback, snap)
-	r.scrollbackMu.Lock()
+	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
 	r.scrollbackView.Normalize(totalRows, rows, contentCols, colsForViewport(stdout, stdin, snap))
 	changed := r.scrollbackView.Page(totalRows, rows, delta, stepRows)
 	r.scrollbackMu.Unlock()
@@ -1160,11 +1168,13 @@ func (r *Runner) scrollbackPanX(delta int, stdout, stdin *os.File) {
 	if snap == nil {
 		return
 	}
-	scrollback := local.scrollbackSnapshot()
 	cols := colsForViewport(stdout, stdin, snap)
+	r.scrollbackMu.Lock()
+	history := local.scrollbackSnapshotState()
+	scrollback := history.rows
 	contentCols := scrollbackContentWidthTerminal(scrollback, snap)
 	totalRows := len(scrollback) + int(snap.Rows)
-	r.scrollbackMu.Lock()
+	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
 	r.scrollbackView.Normalize(totalRows, rowsForViewport(stdout, stdin, snap), contentCols, cols)
 	changed := r.scrollbackView.PanX(contentCols, cols, delta)
 	r.scrollbackMu.Unlock()
@@ -1196,14 +1206,16 @@ func (r *Runner) scrollbackTop(viewRows int, stdout, stdin *os.File) {
 	if local == nil {
 		return
 	}
-	scrollback := local.scrollbackSnapshot()
 	snap := local.Snapshot()
 	if snap == nil {
 		return
 	}
+	r.scrollbackMu.Lock()
+	history := local.scrollbackSnapshotState()
+	scrollback := history.rows
 	totalRows := len(scrollback) + int(snap.Rows)
 	contentCols := scrollbackContentWidthTerminal(scrollback, snap)
-	r.scrollbackMu.Lock()
+	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
 	r.scrollbackView.Normalize(totalRows, viewRows, contentCols, colsForViewport(stdout, stdin, snap))
 	r.scrollbackView.Top(totalRows, viewRows)
 	r.scrollbackMu.Unlock()
@@ -1221,8 +1233,14 @@ func (r *Runner) scrollbackBottom(stdout, stdin *os.File) {
 		}
 		return
 	}
+	local := r.localSession(sessionID)
+	if local == nil {
+		return
+	}
 	r.scrollbackMu.Lock()
+	history := local.scrollbackSnapshotState()
 	if r.scrollbackView.Active() && r.scrollbackSession == sessionID {
+		r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
 		r.scrollbackView.Bottom()
 	}
 	r.scrollbackMu.Unlock()
@@ -1230,14 +1248,14 @@ func (r *Runner) scrollbackBottom(stdout, stdin *os.File) {
 }
 
 func (r *Runner) renderScrollback(stdout, stdin *os.File) {
+	r.scrollbackRenderMu.Lock()
+	defer r.scrollbackRenderMu.Unlock()
 	sessionID, isLocal := r.activeSession()
 	if sessionID == "" {
 		return
 	}
 	r.scrollbackMu.Lock()
 	active := r.scrollbackView.Active() && r.scrollbackSession == sessionID
-	offset := r.scrollbackView.Offset()
-	colOffset := r.scrollbackView.Column()
 	r.scrollbackMu.Unlock()
 	if !active {
 		return
@@ -1256,13 +1274,23 @@ func (r *Runner) renderScrollback(stdout, stdin *os.File) {
 	if snap == nil {
 		return
 	}
-	scrollback := local.scrollbackSnapshot()
 	cols, rows := termSizeAny(stdout, stdin)
 	if cols <= 0 || rows <= 0 {
 		cols = int(snap.Cols)
 		rows = int(snap.Rows)
 	}
+	r.scrollbackMu.Lock()
+	if !r.scrollbackView.Active() || r.scrollbackSession != sessionID {
+		r.scrollbackMu.Unlock()
+		return
+	}
+	history := local.scrollbackSnapshotState()
+	scrollback := history.rows
+	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
+	r.scrollbackView.Normalize(len(scrollback)+int(snap.Rows), rows, scrollbackContentWidthTerminal(scrollback, snap), cols)
+	offset, colOffset := r.scrollbackView.Offset(), r.scrollbackView.Column()
 	percent := r.scrollbackView.Percent(len(scrollback)+int(snap.Rows), rows)
+	r.scrollbackMu.Unlock()
 	r.runtime().ApplyAction(mvu.ScrollbackPercentAction{Visible: true, Percent: percent})
 	viewSnap := mvu.BuildScrollbackViewFromTerminal(cols, rows, scrollback, snap, offset, colOffset)
 	ctx := r.runCtx
@@ -2147,6 +2175,7 @@ func (r *Runner) handleLocalOutput(stdout, stdin *os.File) func(id string, data 
 			return
 		}
 		if r.scrollbackActiveFor(id) {
+			r.renderScrollback(stdout, stdin)
 			return
 		}
 		local := r.localSession(id)

@@ -1113,11 +1113,15 @@ func (c *Client) handleScrollback(scrollback *protocolpb.Scrollback) {
 		c.scrollbackBuffer = mvu.NewProtoScrollbackBuffer(config.DefaultScrollbackLines)
 	}
 	c.scrollbackBuffer.Apply(scrollback)
-	viewRows := snapshotRows
+	viewRows := c.scrollbackViewRows()
+	if viewRows <= 0 {
+		viewRows = snapshotRows
+	}
 	if viewRows <= 0 {
 		viewRows = config.DefaultTerminalRows
 	}
 	totalRows := c.scrollbackBuffer.Len() + snapshotRows
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	c.scrollbackMu.Unlock()
 }
@@ -1151,6 +1155,7 @@ func (c *Client) setScrollbackActive(active bool) {
 		rowOffset = 0
 	}
 	c.scrollbackView.EnterAt(totalRows, viewRows, rowOffset, contentCols, viewCols, colOffset)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.setScrollbackMouseActive(true)
 }
 
@@ -1173,6 +1178,7 @@ func (c *Client) scrollbackPage(delta int, stepRows int) bool {
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	return c.scrollbackView.Page(totalRows, viewRows, delta, stepRows)
 }
@@ -1188,6 +1194,7 @@ func (c *Client) scrollbackPanX(delta int) bool {
 	viewRows := c.scrollbackViewRows()
 	viewCols := c.scrollbackViewCols()
 	contentCols := protoScrollbackContentWidthLocked(c)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	return c.scrollbackView.PanX(contentCols, viewCols, delta)
 }
@@ -1371,6 +1378,7 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	}
 	totalRows := len(scrollRows) + int(snap.Rows)
 	contentCols := protoScrollbackContentWidth(scrollRows, snap)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, rows, contentCols, cols)
 	scrollOffset := c.scrollbackView.Offset()
 	scrollCol := c.scrollbackView.Column()
@@ -1587,6 +1595,7 @@ func (c *Client) ScrollbackTop(viewRows int) {
 	if viewRows <= 0 {
 		viewRows = c.scrollbackViewRows()
 	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	c.scrollbackView.Top(totalRows, viewRows)
 }
@@ -1600,6 +1609,7 @@ func (c *Client) ScrollbackBottom() {
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, c.scrollbackViewRows(), protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	c.scrollbackView.Bottom()
 }

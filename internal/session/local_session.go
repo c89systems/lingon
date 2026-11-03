@@ -65,6 +65,7 @@ type localSession struct {
 	preserveOriginRow int
 	scrollMu          sync.RWMutex
 	scroll            []terminal.ScrollbackRow
+	scrollEnd         int
 	pending           []terminal.ScrollbackRow
 
 	holderMu sync.Mutex
@@ -547,19 +548,24 @@ func (s *localSession) SetPublisher(p *publisher.Publisher) {
 	}
 }
 
+type localScrollbackSnapshot struct {
+	rows []terminal.ScrollbackRow
+	end  int
+}
+
 func (s *localSession) scrollbackSnapshot() []terminal.ScrollbackRow {
+	return s.scrollbackSnapshotState().rows
+}
+
+// Return rows and their cumulative end under one lock, including after trimming.
+func (s *localSession) scrollbackSnapshotState() localScrollbackSnapshot {
 	s.scrollMu.RLock()
 	defer s.scrollMu.RUnlock()
-	if len(s.scroll) == 0 {
-		return nil
+	state := localScrollbackSnapshot{end: s.scrollEnd}
+	if len(s.scroll) > 0 {
+		state.rows = cloneScrollbackRows(s.scroll)
 	}
-	out := make([]terminal.ScrollbackRow, len(s.scroll))
-	for i, row := range s.scroll {
-		cells := make([]terminal.Cell, len(row.Cells))
-		copy(cells, row.Cells)
-		out[i] = terminal.ScrollbackRow{Cols: row.Cols, Cells: cells}
-	}
-	return out
+	return state
 }
 
 func (s *localSession) appendScrollback(rows []terminal.ScrollbackRow) []terminal.ScrollbackRow {
@@ -575,6 +581,7 @@ func (s *localSession) appendScrollback(rows []terminal.ScrollbackRow) []termina
 		appended[i] = terminal.ScrollbackRow{Cols: row.Cols, Cells: cells}
 	}
 	s.scroll = append(s.scroll, appended...)
+	s.scrollEnd += len(appended)
 	if s.scrollbackLines > 0 && len(s.scroll) > s.scrollbackLines {
 		extra := len(s.scroll) - s.scrollbackLines
 		s.scroll = append([]terminal.ScrollbackRow(nil), s.scroll[extra:]...)

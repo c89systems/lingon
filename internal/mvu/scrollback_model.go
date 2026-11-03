@@ -4,9 +4,11 @@ import "pkt.systems/lingon/internal/protocolpb"
 
 // ScrollbackViewport tracks MVU scrollback view state independently of storage.
 type ScrollbackViewport struct {
-	active bool
-	offset int
-	col    int
+	active       bool
+	offset       int
+	col          int
+	history      ScrollbackPosition
+	historyKnown bool
 }
 
 // Enter enables scrollback view and resets offsets.
@@ -15,6 +17,7 @@ func (v *ScrollbackViewport) Enter() {
 		return
 	}
 	v.active = true
+	v.historyKnown = false
 	v.offset = 0
 	v.col = 0
 }
@@ -26,6 +29,7 @@ func (v *ScrollbackViewport) EnterAt(totalRows, viewRows, rowOffset, contentCols
 		return
 	}
 	v.active = true
+	v.historyKnown = false
 	v.SetOffset(totalRows, viewRows, rowOffset)
 	v.SetColumn(contentCols, viewCols, colOffset)
 }
@@ -36,6 +40,7 @@ func (v *ScrollbackViewport) Exit() {
 		return
 	}
 	v.active = false
+	v.historyKnown = false
 	v.offset = 0
 	v.col = 0
 }
@@ -50,6 +55,7 @@ func (v *ScrollbackViewport) SetActive(active bool) {
 		return
 	}
 	v.active = false
+	v.historyKnown = false
 	v.offset = 0
 	v.col = 0
 }
@@ -247,9 +253,10 @@ func scrollbackMaxColumn(contentCols, viewCols int) int {
 
 // ProtoScrollbackBuffer owns attach-side protocol scrollback rows.
 type ProtoScrollbackBuffer struct {
-	rows  []*protocolpb.ScrollbackRow
-	cols  int
-	limit int
+	rows     []*protocolpb.ScrollbackRow
+	cols     int
+	limit    int
+	position ScrollbackPosition
 }
 
 // NewProtoScrollbackBuffer constructs a protocol scrollback buffer.
@@ -271,16 +278,17 @@ func (b *ProtoScrollbackBuffer) Apply(scrollback *protocolpb.Scrollback) {
 	if b == nil || scrollback == nil {
 		return
 	}
-	if scrollback.Clear {
+	reset := scrollback.Clear || (scrollback.Cols > 0 && b.cols != 0 && b.cols != int(scrollback.Cols))
+	if reset {
 		b.rows = nil
+		b.position.Generation++
+		b.position.End = 0
 	}
 	if scrollback.Cols > 0 {
 		cols := int(scrollback.Cols)
-		if b.cols != 0 && b.cols != cols {
-			b.rows = nil
-		}
 		b.cols = cols
 	}
+	b.position.End += len(scrollback.Rows)
 	for _, row := range scrollback.Rows {
 		b.rows = append(b.rows, cloneProtoScrollbackRow(row))
 	}

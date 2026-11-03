@@ -314,6 +314,15 @@ When switching local headless tabs, a session awaiting its first snapshot keeps
 the displayed contents under a loading banner. Its first snapshot replaces the
 contents; tab switching does not clear the screen.
 
+#### Browse live scrollback
+
+Press `Ctrl+l [` in the interactive host or `lingon attach` to browse scrollback.
+Output keeps filling the buffer while the rows you are viewing stay in place.
+Navigation moves that anchor; `End` or `G` jumps to the newest content without
+leaving scrollback mode. Later output accumulates below that position. If the
+history limit removes the anchored text, the view clamps to the oldest retained
+rows. Press `q` or Escape to return to the live screen.
+
 #### Find a session
 
 In the interactive host and `lingon attach`, press `Ctrl+l /` to open a search

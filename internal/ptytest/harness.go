@@ -613,6 +613,8 @@ func geometryRows(size *terminal.WindowSize) int {
 
 // AttachOptions configures a PTY-backed attach client.
 type AttachOptions struct {
+	// OnFrame observes incoming frames before handling, for ordered test barriers.
+	OnFrame func(*protocolpb.Frame)
 	// Geometry overrides logical startup dimensions without resizing the owned outer PTY.
 	Geometry *terminal.WindowSize
 	// Restore enables remote-size following in this test-owned PTY.
@@ -702,6 +704,7 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 		opts.DesktopNotifier,
 	)
 	client := &attach.Client{
+		OnFrame: opts.OnFrame,
 		Restore: opts.Restore,
 		Cols:    geometryCols(opts.Geometry), Rows: geometryRows(opts.Geometry),
 		ClipboardReader:             opts.ClipboardReader,
