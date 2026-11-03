@@ -194,15 +194,15 @@ func TestRestoreWindowRequestRunsOnlyOnEntryAndActivation(t *testing.T) {
 	if msg := c.compositor.Read().ConnectionMessage; strings.Contains(msg, "remote remains") {
 		t.Fatalf("manual resize left stale warning: %q", msg)
 	}
-	if c.restoreManual != (terminal.WindowSize{Cols: 90, Rows: 25}) {
+	if c.restoreManual.Pending() != (terminal.WindowSize{Cols: 90, Rows: 25}) {
 		t.Fatal("pending manual size lost before acknowledgement")
 	}
 	c.restoreTerminalLocked(mvu.BlankSnapshot(120, 35))
-	if c.restoreManual == (terminal.WindowSize{}) {
+	if c.restoreManual.Pending() == (terminal.WindowSize{}) {
 		t.Fatal("stale snapshot acknowledged the manual size")
 	}
 	c.restoreTerminalLocked(mvu.BlankSnapshot(90, 25))
-	if c.restoreManual != (terminal.WindowSize{}) {
+	if c.restoreManual.Pending() != (terminal.WindowSize{}) {
 		t.Fatal("remote acknowledgement did not clear pending size")
 	}
 }
@@ -219,7 +219,7 @@ func TestRestoreManualResizeDoesNotRememberRejectedViewOnlySize(t *testing.T) {
 	if err := c.processTerminalResize(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	if c.restoreManual != (terminal.WindowSize{}) {
+	if c.restoreManual.Pending() != (terminal.WindowSize{}) {
 		t.Fatal("read-only camera resize became a pending remote size")
 	}
 	c.SetStdout(io.Discard)

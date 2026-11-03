@@ -70,6 +70,9 @@ func (c *Client) restoreState() *atomic.Bool {
 		if c.restoreWindow == nil {
 			c.restoreWindow = &restoreWindow{}
 		}
+		if c.restoreManual == nil {
+			c.restoreManual = &terminal.WindowSizeRequest{}
+		}
 	})
 	return c.restoreMode
 }
@@ -86,9 +89,12 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 	if snap == nil {
 		return
 	}
+	c.restoreState()
 	size := terminal.WindowSize{Cols: int(snap.Cols), Rows: int(snap.Rows)}
-	if size == c.restoreManual || c.isViewOnly() {
-		c.restoreManual = terminal.WindowSize{}
+	if c.isViewOnly() {
+		c.restoreManual.Set(terminal.WindowSize{})
+	} else {
+		c.restoreManual.Observe(size)
 	}
 	geometryPending := c.restoreGeometryPending(size)
 	if !c.restoreEnabled() || c.stdoutWriter() == io.Discard || geometryPending {
@@ -108,8 +114,8 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 	}
 	c.restoreInitialized = true
 	c.restoreLocal = terminal.WindowSize{Cols: localCols, Rows: localRows}
-	if c.restoreManual.Cols > 0 && c.restoreManual.Rows > 0 {
-		cols, rows = c.restoreManual.Cols, c.restoreManual.Rows
+	if manual := c.restoreManual.Pending(); manual.Cols > 0 && manual.Rows > 0 {
+		cols, rows = manual.Cols, manual.Rows
 	}
 	pending := c.restoreWindow.latest()
 	target := terminal.WindowSize{Cols: cols, Rows: rows}
@@ -154,7 +160,7 @@ func (c *Client) toggleRestore() bool {
 	c.renderMu.Lock()
 	c.restoreRequest = restoreRequest{}
 	c.restoreInitialized = false
-	c.restoreManual = terminal.WindowSize{}
+	c.restoreManual.Set(terminal.WindowSize{})
 	cols, rows := c.terminalSize()
 	c.restoreLocal = terminal.WindowSize{Cols: cols, Rows: rows}
 	c.renderMu.Unlock()
@@ -181,7 +187,7 @@ func (c *Client) processTerminalResize(ctx context.Context, allowNormal bool) er
 			c.restoreInitialized = true
 			c.restoreRequest = restoreRequest{}
 			c.restoreLocal = actual
-			c.restoreManual = actual
+			c.restoreManual.Set(actual)
 			manual = true
 		}
 	}
@@ -202,11 +208,11 @@ func (c *Client) applyRestoreManualResize(ctx context.Context) error {
 	}
 	c.renderMu.Lock()
 	if c.isViewOnly() {
-		c.restoreManual = terminal.WindowSize{}
+		c.restoreManual.Set(terminal.WindowSize{})
 		c.renderMu.Unlock()
 		return nil
 	}
-	size := c.restoreManual
+	size := c.restoreManual.Pending()
 	c.renderMu.Unlock()
 	if size.Cols <= 0 || size.Rows <= 0 {
 		return nil

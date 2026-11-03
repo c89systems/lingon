@@ -114,8 +114,8 @@ type Client struct {
 	restoreRequest            restoreRequest // protected by renderMu
 	restoreInitialized        bool
 	restoreLocal              terminal.WindowSize
-	restoreManual             terminal.WindowSize
-	searchBaseline            *protocolpb.Snapshot // protected by renderMu
+	restoreManual             *terminal.WindowSizeRequest // shared across same-session reconnects
+	searchBaseline            *protocolpb.Snapshot        // protected by renderMu
 	lastSnapshot              *protocolpb.Snapshot
 	lastSeq                   uint64
 	needsResync               bool
@@ -761,7 +761,8 @@ func (c *Client) SetRenderDisabled(disabled bool) {
 	c.renderMu.Unlock()
 }
 
-// SeedFrom copies the last known snapshot/sequence from a previous client.
+// SeedFrom carries same-session snapshot, render and pending resize state across
+// reconnects. A different session inherits only the client identity.
 func (c *Client) SeedFrom(prev *Client) {
 	if prev == nil {
 		return
@@ -781,7 +782,10 @@ func (c *Client) SeedFrom(prev *Client) {
 	if prev.SessionID != c.SessionID {
 		return
 	}
+	prev.restoreState()
+	c.restoreState()
 	prev.renderMu.Lock()
+	manual := prev.restoreManual
 	renderCache := prev.renderCache
 	renderCache.PrevSnapshot = cloneSnapshot(renderCache.PrevSnapshot)
 	prev.renderMu.Unlock()
@@ -792,6 +796,7 @@ func (c *Client) SeedFrom(prev *Client) {
 	c.resyncRequested = false
 	c.mu.Unlock()
 	c.renderMu.Lock()
+	c.restoreManual = manual
 	c.renderCache = renderCache
 	c.renderMu.Unlock()
 }

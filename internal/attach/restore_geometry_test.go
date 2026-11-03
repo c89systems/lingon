@@ -150,7 +150,8 @@ func TestRestoreGeometryRechecksQueuedStartupSizeAtDelivery(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- c.applyGeometry(ctx) }()
 	c.cancelRestoreGeometry()
-	c.restoreManual = terminal.WindowSize{Cols: 88, Rows: 26}
+	c.restoreState()
+	c.restoreManual.Set(terminal.WindowSize{Cols: 88, Rows: 26})
 	c.writeMu.Unlock()
 	if err := <-done; err != nil {
 		t.Fatal(err)
