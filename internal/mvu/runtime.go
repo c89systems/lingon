@@ -3,8 +3,9 @@ package mvu
 import (
 	"bytes"
 	"io"
-	"strings"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/render"
@@ -80,40 +81,6 @@ type AttachRenderOutput struct {
 	ComposedSnapshot *protocolpb.Snapshot
 }
 
-type topOverlayRenderOptions struct {
-	SkipTabBar         bool
-	PrevConnectionLen  int
-	PrevScrollbackLen  int
-	PrevBannerRowOwned bool
-	BannerOwnsRow      bool
-}
-
-func bannerRowOwned(resolved Resolved, owns bool) bool {
-	return owns && !resolved.TabBarVisible && (resolved.ConnectionVisible || resolved.LoadingVisible)
-}
-
-func frameBannerRowOwned(frame FrameState, owns bool) bool {
-	return owns && !frame.LastTabBarVisible && (frame.LastConnectionVisible || frame.LastLoadingVisible)
-}
-
-func topStatusStable(prev FrameState, resolved Resolved) bool {
-	if prev.LastConnectionVisible != resolved.ConnectionVisible {
-		return false
-	}
-	if prev.LastLoadingVisible != resolved.LoadingVisible {
-		return false
-	}
-	if prev.LastScrollbackVisible != resolved.ScrollbackVisible {
-		return false
-	}
-	if resolved.ConnectionVisible {
-		if prev.LastConnectionStyle != resolved.State.ConnectionStyle {
-			return false
-		}
-	}
-	return true
-}
-
 // RenderHost executes the host MVU update+view pipeline for one frame.
 func RenderHost(in HostRenderInput) (HostRenderOutput, error) {
 	out := HostRenderOutput{}
@@ -123,13 +90,6 @@ func RenderHost(in HostRenderInput) (HostRenderOutput, error) {
 	if resolved.TabBarVisible {
 		tabSig = tabBarSignature(in.Cols, resolved.State)
 	}
-	skipTabBar := resolved.TabBarVisible &&
-		in.Frame.LastTabBarVisible &&
-		in.Frame.LastTopOverlayVisible &&
-		in.Frame.LastTabBarSignature == tabSig &&
-		topStatusStable(in.Frame, resolved) &&
-		!in.ForceFull &&
-		in.PrevSnapshot != nil
 	composed, err := ComposeViewportSnapshot(in.Snapshot, in.Cols, in.Rows, resolved, in.Cursor)
 	if err != nil {
 		return out, err
@@ -148,22 +108,11 @@ func RenderHost(in HostRenderInput) (HostRenderOutput, error) {
 	if in.Frame.LastSnapRows > 0 && in.Frame.LastSnapRows != int(composed.Rows) {
 		clear = true
 	}
-	if (in.Frame.LastRenderCols > 0 || in.Frame.LastRenderRows > 0 || in.Frame.LastSnapCols > 0 || in.Frame.LastSnapRows > 0) &&
-		in.Frame.LastScrollback != resolved.ScrollbackVisible {
-		clear = true
-	}
 	if clear {
 		prev = nil
 	}
-	skipTabBar = skipTabBar && prev != nil
 	var frame bytes.Buffer
-	if err := renderSnapshot(&frame, prev, composed, in.Cols, in.Rows, in.ForceFull, resolved, in.Cursor, topOverlayRenderOptions{
-		SkipTabBar:         skipTabBar,
-		PrevConnectionLen:  in.Frame.LastConnectionLen,
-		PrevScrollbackLen:  in.Frame.LastScrollbackLen,
-		PrevBannerRowOwned: frameBannerRowOwned(in.Frame, false),
-		BannerOwnsRow:      false,
-	}); err != nil {
+	if err := renderSnapshot(&frame, prev, composed, in.Cols, in.Rows, in.ForceFull); err != nil {
 		return out, err
 	}
 	out.Bytes = frame.Bytes()
@@ -209,26 +158,12 @@ func RenderAttach(in AttachRenderInput) (AttachRenderOutput, error) {
 	prev := in.PrevSnapshot
 	clear := in.Frame.LastRenderCols == 0 || in.Frame.LastRenderRows == 0 ||
 		in.Frame.LastRenderCols != in.Cols || in.Frame.LastRenderRows != in.Rows ||
-		in.Frame.LastSnapCols != int(composed.Cols) || in.Frame.LastSnapRows != int(composed.Rows) ||
-		in.Frame.LastScrollback != in.ScrollbackVisible
+		in.Frame.LastSnapCols != int(composed.Cols) || in.Frame.LastSnapRows != int(composed.Rows)
 	if clear {
 		prev = nil
 	}
-	skipTabBar := resolved.TabBarVisible &&
-		in.Frame.LastTabBarVisible &&
-		in.Frame.LastTopOverlayVisible &&
-		in.Frame.LastTabBarSignature == tabSig &&
-		topStatusStable(in.Frame, resolved) &&
-		!in.ForceFull &&
-		prev != nil
 	var frame bytes.Buffer
-	if err := renderSnapshot(&frame, prev, composed, in.Cols, in.Rows, in.ForceFull, resolved, in.Cursor, topOverlayRenderOptions{
-		SkipTabBar:         skipTabBar,
-		PrevConnectionLen:  in.Frame.LastConnectionLen,
-		PrevScrollbackLen:  in.Frame.LastScrollbackLen,
-		PrevBannerRowOwned: frameBannerRowOwned(in.Frame, true),
-		BannerOwnsRow:      true,
-	}); err != nil {
+	if err := renderSnapshot(&frame, prev, composed, in.Cols, in.Rows, in.ForceFull); err != nil {
 		return out, err
 	}
 	out.Bytes = frame.Bytes()
@@ -260,119 +195,32 @@ func RenderAttach(in AttachRenderInput) (AttachRenderOutput, error) {
 	return out, nil
 }
 
-func renderSnapshot(w io.Writer, prev, snap *protocolpb.Snapshot, cols, rows int, forceClear bool, resolved Resolved, cursor Cursor, top topOverlayRenderOptions) error {
-	cursor = searchCursor(resolved.State.Search, cols, rows, cursor)
+// The snapshot already contains the complete View, including every overlay.
+// Emit only its changed cells; never repaint a base layer and repair it later.
+func renderSnapshot(w io.Writer, prev, snap *protocolpb.Snapshot, cols, rows int, forceClear bool) error {
 	if forceClear {
 		return render.SnapshotViewport(w, snap, cols, rows)
 	}
-	bannerOwns := bannerRowOwned(resolved, top.BannerOwnsRow)
-	topRowOwned := resolved.TabBarVisible || bannerOwns
-	if topRowOwned {
-		if bannerOwns && !resolved.TabBarVisible {
-			return renderBannerOverlayFrame(w, prev, snap, cols, rows, resolved, cursor)
-		}
-		var err error
-		if prev != nil {
-			err = render.SnapshotViewportDeltaMaskTopRow(w, prev, snap, cols, rows)
-		} else {
-			err = render.SnapshotViewportNoClearMaskTopRow(w, snap, cols, rows)
-		}
-		if err != nil {
-			return err
-		}
-		var overlay []byte
-		if top.SkipTabBar {
-			overlay = ComposeTopOverlayResolvedNoTabsPadded(cols, cursor, resolved, top.PrevConnectionLen, top.PrevScrollbackLen)
-		} else {
-			overlay = ComposeTopOverlayResolved(cols, cursor, resolved)
-		}
-		if len(overlay) == 0 {
+	if prev != nil {
+		if proto.Equal(prev, snap) {
 			return nil
 		}
-		_, err = w.Write(overlay)
-		return err
-	}
-	if top.PrevBannerRowOwned {
-		if err := render.SnapshotViewportNoClear(w, snap, cols, 1); err != nil {
-			return err
-		}
-		if rows > 1 {
-			if err := render.SnapshotViewportDeltaSkipTopRow(w, prev, snap, cols, rows); err != nil {
-				return err
-			}
-		}
-		var cursorBuf bytes.Buffer
-		WriteCursor(&cursorBuf, cursor)
-		_, err := w.Write(cursorBuf.Bytes())
-		return err
-	}
-	if prev != nil {
 		return render.SnapshotViewportDelta(w, prev, snap, cols, rows)
 	}
-	return render.SnapshotViewportNoClear(w, snap, cols, rows)
-}
-
-func renderBannerOverlayFrame(w io.Writer, prev, snap *protocolpb.Snapshot, cols, rows int, resolved Resolved, cursor Cursor) error {
-	if prev != nil {
-		if err := render.SnapshotViewportDeltaMaskTopRow(w, prev, snap, cols, rows); err != nil {
-			return err
-		}
-	} else if rows > 1 {
-		if err := render.SnapshotViewportNoClearMaskTopRow(w, snap, cols, rows); err != nil {
-			return err
-		}
-	}
-
-	message, style := topBannerMessageAndStyle(resolved)
-	if message == "" || cols <= 0 {
-		var cursorBuf bytes.Buffer
-		WriteCursor(&cursorBuf, cursor)
-		_, err := w.Write(cursorBuf.Bytes())
+	// With no display baseline, initialize row one once from final model cells.
+	// Preserve the initial top-row ownership contract without painting a base
+	// layer or running an overlay repair phase.
+	if _, err := io.WriteString(w, "\x1b[1;1H\x1b[0m\x1b[2K"); err != nil {
 		return err
 	}
-	if len(message) > cols {
-		message = message[len(message)-cols:]
+	if _, err := io.WriteString(w, render.ViewportRowSpan(snap, cols, rows, 0, 0, cols-1)); err != nil {
+		return err
 	}
-	startCol := cols - len(message) + 1
-	if startCol < 1 {
-		startCol = 1
+	if err := render.SnapshotViewportNoClearMaskTopRow(w, snap, cols, rows); err != nil {
+		return err
 	}
-
-	var row bytes.Buffer
-	row.WriteString("\x1b[1;1H")
-	if startCol > 1 {
-		row.WriteString(render.ViewportRowSpan(snap, cols, rows, 0, 0, startCol-1))
-	}
-	row.WriteString("\x1b[1;")
-	row.WriteString(itoa(startCol))
-	row.WriteString("H")
-	switch style {
-	case BannerGreen:
-		row.WriteString("\x1b[38;2;0;0;0;42m")
-	case BannerYellow:
-		row.WriteString("\x1b[38;2;0;0;0;43m")
-	default:
-		row.WriteString("\x1b[97;41m")
-	}
-	row.WriteString(message)
-	row.WriteString(resolved.State.Theme.Reset)
-	WriteCursor(&row, cursor)
-	_, err := w.Write(row.Bytes())
+	var cursor bytes.Buffer
+	WriteCursor(&cursor, CursorFromSnapshot(snap, cols, rows))
+	_, err := w.Write(cursor.Bytes())
 	return err
-}
-
-func topBannerMessageAndStyle(resolved Resolved) (string, BannerStyle) {
-	if resolved.ConnectionVisible {
-		return resolved.State.ConnectionMessage, resolved.State.ConnectionStyle
-	}
-	if resolved.LoadingVisible {
-		return resolved.State.LoadingMessage, BannerYellow
-	}
-	if resolved.ScrollbackVisible {
-		msg := strings.TrimSpace(resolved.State.ScrollbackMessage)
-		if msg != "" {
-			return msg, BannerGreen
-		}
-	}
-	return "", BannerGreen
 }

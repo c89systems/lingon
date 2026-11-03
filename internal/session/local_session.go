@@ -66,6 +66,8 @@ type localSession struct {
 	scrollMu          sync.RWMutex
 	scroll            []terminal.ScrollbackRow
 	scrollEnd         int
+	scrollLive        *protocolpb.Snapshot
+	scrollLiveEnd     int
 	pending           []terminal.ScrollbackRow
 
 	holderMu sync.Mutex
@@ -499,6 +501,7 @@ func newLocalSession(parent context.Context, opts localSessionOptions) *localSes
 		}
 		session.preserved = cloneSnapshot(session.snapshot)
 	}
+	session.scrollLive = session.snapshot
 	session.setOscDefaults(opts.DefaultFg, opts.DefaultBg, opts.DefaultCursor)
 	session.clipboardHandler = clipboard.NewHandler(session.submitRemoteImage)
 	go session.runRemoteInput()
@@ -549,8 +552,10 @@ func (s *localSession) SetPublisher(p *publisher.Publisher) {
 }
 
 type localScrollbackSnapshot struct {
-	rows []terminal.ScrollbackRow
-	end  int
+	rows    []terminal.ScrollbackRow
+	end     int
+	live    *protocolpb.Snapshot
+	liveEnd int
 }
 
 func (s *localSession) scrollbackSnapshot() []terminal.ScrollbackRow {
@@ -559,13 +564,24 @@ func (s *localSession) scrollbackSnapshot() []terminal.ScrollbackRow {
 
 // Return rows and their cumulative end under one lock, including after trimming.
 func (s *localSession) scrollbackSnapshotState() localScrollbackSnapshot {
+	return s.scrollbackFrameState(true)
+}
+
+func (s *localSession) scrollbackFrameState(includeRows bool) localScrollbackSnapshot {
 	s.scrollMu.RLock()
 	defer s.scrollMu.RUnlock()
-	state := localScrollbackSnapshot{end: s.scrollEnd}
-	if len(s.scroll) > 0 {
+	state := localScrollbackSnapshot{end: s.scrollEnd, live: s.scrollLive, liveEnd: s.scrollLiveEnd}
+	if includeRows && len(s.scroll) > 0 {
 		state.rows = cloneScrollbackRows(s.scroll)
 	}
 	return state
+}
+
+// Commit the live grid's history coordinate before notifying UI observers.
+func (s *localSession) commitScrollbackFrame(snap *protocolpb.Snapshot) {
+	s.scrollMu.Lock()
+	s.scrollLive, s.scrollLiveEnd = snap, s.scrollEnd
+	s.scrollMu.Unlock()
 }
 
 func (s *localSession) appendScrollback(rows []terminal.ScrollbackRow) []terminal.ScrollbackRow {
@@ -698,6 +714,9 @@ func (s *localSession) Resize(cols, rows int) (snapshot *protocolpb.Snapshot, re
 	s.outputMu.Lock()
 	defer s.outputMu.Unlock()
 	defer func() {
+		if resizeErr == nil && snapshot != nil {
+			s.commitScrollbackFrame(snapshot)
+		}
 		if resizeErr == nil && snapshot != nil && s.publisher != nil {
 			s.publisher.Resize(cols, rows, snapshot)
 		}
@@ -2443,6 +2462,7 @@ func (s *localSession) processPTYOutput(data []byte) error {
 		}
 	}
 	scrollRows = s.appendScrollback(s.drainScrollbackRows(scrollRows))
+	s.commitScrollbackFrame(snap)
 	if s.onOutput != nil {
 		s.onOutput(s.id, filtered, snap)
 	}

@@ -9,13 +9,14 @@ import (
 
 // DisabledRenderInput is one MVU disabled/dim render update.
 type DisabledRenderInput struct {
-	Snapshot *protocolpb.Snapshot
-	Cols     int
-	Rows     int
-	Cursor   Cursor
-	State    State
-	Now      time.Time
-	Resolve  ResolveOptions
+	Snapshot     *protocolpb.Snapshot
+	PrevSnapshot *protocolpb.Snapshot
+	Cols         int
+	Rows         int
+	Cursor       Cursor
+	State        State
+	Now          time.Time
+	Resolve      ResolveOptions
 }
 
 // DisabledRenderOutput is one MVU disabled/dim render output.
@@ -38,7 +39,7 @@ func RenderDisabled(in DisabledRenderInput) (DisabledRenderOutput, error) {
 		return out, err
 	}
 	var frame bytes.Buffer
-	if err := renderSnapshot(&frame, nil, composed, in.Cols, in.Rows, false, resolved, in.Cursor, topOverlayRenderOptions{}); err != nil {
+	if err := renderSnapshot(&frame, in.PrevSnapshot, composed, in.Cols, in.Rows, false); err != nil {
 		return out, err
 	}
 	out.Bytes = frame.Bytes()

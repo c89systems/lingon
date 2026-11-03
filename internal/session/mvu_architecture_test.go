@@ -102,7 +102,7 @@ func TestSessionRenderingDoesNotUseRowOnePartialPainter(t *testing.T) {
 		"mvu.ContextAction{",
 		"mvu.HelpVisibleAction{",
 		"mvu.TabToggleAction{}",
-		"mvu.ScrollbackPercentAction{",
+		".scrollbackView.Update(",
 		"mvu.ClearOverlaysAction{}",
 		"mvu.TabSuppressedAction{",
 		"mvu.SessionTabsAction{",

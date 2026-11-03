@@ -10,6 +10,7 @@ import (
 // RuntimeHostFrameInput is one runtime-backed host render request.
 type RuntimeHostFrameInput struct {
 	Snapshot     *protocolpb.Snapshot
+	Scrollback   *ScrollbackFrame
 	Cols         int
 	Rows         int
 	Cursor       Cursor
@@ -36,7 +37,7 @@ func (r *Runtime) RenderHostFrame(in RuntimeHostFrameInput) (RuntimeHostFrameOut
 	if now.IsZero() {
 		now = r.now()
 	}
-	state := r.State()
+	state := scrollbackFrameState(r.State(), in.Scrollback)
 	renderState, resolveOpts, tabDelay := r.PrepareRenderState(state, in.Cursor, now, RenderStateOptions{
 		SuppressTabs: in.SuppressTabs,
 	})
@@ -72,6 +73,7 @@ func (r *Runtime) RenderHostFrame(in RuntimeHostFrameInput) (RuntimeHostFrameOut
 // RuntimeAttachFrameInput is one runtime-backed attach render request.
 type RuntimeAttachFrameInput struct {
 	Snapshot          *protocolpb.Snapshot
+	Scrollback        *ScrollbackFrame
 	Cols              int
 	Rows              int
 	Cursor            Cursor
@@ -100,7 +102,7 @@ func (r *Runtime) RenderAttachFrame(in RuntimeAttachFrameInput) (RuntimeAttachFr
 	if now.IsZero() {
 		now = r.now()
 	}
-	state := r.State()
+	state := scrollbackFrameState(r.State(), in.Scrollback)
 	renderState, resolveOpts, tabDelay := r.PrepareRenderState(state, in.Cursor, now, RenderStateOptions{
 		SuppressTabs:     in.SuppressTabs,
 		ForceTabsVisible: in.ForceTabsVisible,
@@ -138,6 +140,7 @@ func (r *Runtime) RenderAttachFrame(in RuntimeAttachFrameInput) (RuntimeAttachFr
 // RuntimeDisabledFrameInput is one runtime-backed disabled render request.
 type RuntimeDisabledFrameInput struct {
 	Snapshot          *protocolpb.Snapshot
+	Scrollback        *ScrollbackFrame
 	Cols              int
 	Rows              int
 	Cursor            Cursor
@@ -162,14 +165,19 @@ func (r *Runtime) RenderDisabledFrame(in RuntimeDisabledFrameInput) (RuntimeDisa
 	if now.IsZero() {
 		now = r.now()
 	}
+	var prev *protocolpb.Snapshot
+	if in.Cache != nil {
+		prev = in.Cache.PrevSnapshot
+	}
 	rendered, err := RenderDisabled(DisabledRenderInput{
-		Snapshot: in.Snapshot,
-		Cols:     in.Cols,
-		Rows:     in.Rows,
-		Cursor:   in.Cursor,
-		State:    r.State(),
-		Now:      now,
-		Resolve:  ResolveOptions{},
+		PrevSnapshot: prev,
+		Snapshot:     in.Snapshot,
+		Cols:         in.Cols,
+		Rows:         in.Rows,
+		Cursor:       in.Cursor,
+		State:        scrollbackFrameState(r.State(), in.Scrollback),
+		Now:          now,
+		Resolve:      ResolveOptions{},
 	})
 	if err != nil {
 		return out, err
@@ -183,4 +191,15 @@ func (r *Runtime) RenderDisabledFrame(in RuntimeDisabledFrameInput) (RuntimeDisa
 	out.Rendered = rendered
 	out.TabDelay = r.TabBarAutoHideDelay(now)
 	return out, nil
+}
+
+func scrollbackFrameState(state State, frame *ScrollbackFrame) State {
+	if frame == nil {
+		return state
+	}
+	state.ScrollbackMessage = ""
+	if frame.Visible {
+		state.ScrollbackMessage = fmt.Sprintf("[%d%%]", frame.Percent)
+	}
+	return state
 }

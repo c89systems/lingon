@@ -9,6 +9,7 @@ type ScrollbackViewport struct {
 	col          int
 	history      ScrollbackPosition
 	historyKnown bool
+	content      ScrollbackContent
 }
 
 // Enter enables scrollback view and resets offsets.

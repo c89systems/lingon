@@ -97,7 +97,7 @@ func TestAttachRenderingDoesNotUseOverlayOnlyComposePaths(t *testing.T) {
 	}
 	requiredClientActions := []string{
 		"mvu.ContextAction{",
-		"mvu.ScrollbackPercentAction{",
+		".scrollbackView.Update(",
 		"mvu.StatusAction{",
 		"mvu.WallAction{",
 		"mvu.HelpVisibleAction{",

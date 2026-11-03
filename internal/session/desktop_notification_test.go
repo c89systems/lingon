@@ -348,7 +348,7 @@ func TestRunnerShowWallPreservesScrollbackViewport(t *testing.T) {
 		_ = stdout.Close()
 	}()
 
-	r.renderScrollback(stdout, nil)
+	r.forceRedraw(stdout)
 	if out := readOutput(); !strings.Contains(out, "HISTORY-TOKEN") {
 		t.Fatalf("expected initial scrollback render to show history, got %q", out)
 	}
@@ -407,7 +407,7 @@ func TestRunnerShowWallPreservesMixedScrollbackAndLiveViewport(t *testing.T) {
 		_ = stdout.Close()
 	}()
 
-	r.renderScrollback(stdout, nil)
+	r.forceRedraw(stdout)
 	initial := readOutput()
 	if !strings.Contains(initial, "HISTORY-TOKEN") {
 		t.Fatalf("expected mixed viewport to include history, got %q", initial)
