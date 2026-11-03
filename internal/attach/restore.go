@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,6 +14,46 @@ import (
 )
 
 type restoreRequest struct{ cols, rows, localCols, localRows int }
+
+// A terminal window outlives its selected tab. Requests remain pending when the
+// issuing client is hidden; observing a newer request also acknowledges older
+// ones whose SIGWINCH events were coalesced by the terminal.
+type restoreWindow struct {
+	mu      sync.Mutex
+	pending []terminal.WindowSize
+}
+
+func (w *restoreWindow) requested(size terminal.WindowSize) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Repeating the same target need not produce another SIGWINCH. Keep only
+	// one consecutive request so it cannot later swallow a real user resize.
+	if len(w.pending) > 0 && w.pending[len(w.pending)-1] == size {
+		return
+	}
+	w.pending = append(w.pending, size)
+}
+
+func (w *restoreWindow) acknowledge(size terminal.WindowSize) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i, pending := range w.pending {
+		if pending == size {
+			w.pending = w.pending[i+1:]
+			return true
+		}
+	}
+	return false
+}
+
+func (w *restoreWindow) latest() terminal.WindowSize {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.pending) == 0 {
+		return terminal.WindowSize{}
+	}
+	return w.pending[len(w.pending)-1]
+}
 
 func (c *Client) restoreEnabled() bool {
 	return c.restoreState().Load()
@@ -25,6 +66,9 @@ func (c *Client) restoreState() *atomic.Bool {
 	c.restoreOnce.Do(func() {
 		if c.restoreMode == nil {
 			c.restoreMode = newRestoreMode(c.Restore)
+		}
+		if c.restoreWindow == nil {
+			c.restoreWindow = &restoreWindow{}
 		}
 	})
 	return c.restoreMode
@@ -67,15 +111,18 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 	if c.restoreManual.Cols > 0 && c.restoreManual.Rows > 0 {
 		cols, rows = c.restoreManual.Cols, c.restoreManual.Rows
 	}
-	if cols == localCols && rows == localRows {
+	pending := c.restoreWindow.latest()
+	target := terminal.WindowSize{Cols: cols, Rows: rows}
+	if cols == localCols && rows == localRows && (pending == (terminal.WindowSize{}) || pending == target) {
 		c.restoreRequest = restoreRequest{}
 		return
 	}
 	request := restoreRequest{cols, rows, localCols, localRows}
 	c.restoreRequest = request
-	if err := writeAll(c.clock(), c.stdoutWriter(), terminal.WindowResizeSequence(terminal.WindowSize{Cols: cols, Rows: rows})); err != nil {
+	if err := writeAll(c.clock(), c.stdoutWriter(), terminal.WindowResizeSequence(target)); err != nil {
 		return
 	}
+	c.restoreWindow.requested(target)
 	scheduler, ctx := c.effectRuntime()
 	scheduler.Schedule(ctx, "restore-size", time.Second, func() {
 		c.renderMu.Lock()
@@ -117,15 +164,19 @@ func (c *Client) toggleRestore() bool {
 // processTerminalResize distinguishes acknowledgement of our window request
 // from a user resize. Only a user resize changes the selected remote session.
 func (c *Client) processTerminalResize(ctx context.Context, allowNormal bool) error {
+	c.restoreState()
 	c.renderMu.Lock()
 	cols, rows := c.terminalSize()
 	actual := terminal.WindowSize{Cols: cols, Rows: rows}
 	manual := false
-	if c.restoreEnabled() && cols > 0 && rows > 0 && c.stdoutWriter() != io.Discard {
+	acknowledged := c.restoreWindow.acknowledge(actual)
+	if acknowledged {
+		c.restoreLocal = actual
 		if c.restoreRequest.cols == cols && c.restoreRequest.rows == rows {
 			c.restoreRequest = restoreRequest{}
-			c.restoreLocal = actual
-		} else if c.restoreLocal != actual {
+		}
+	} else if c.restoreEnabled() && cols > 0 && rows > 0 && c.stdoutWriter() != io.Discard {
+		if c.restoreLocal != actual {
 			c.cancelRestoreGeometry()
 			c.restoreInitialized = true
 			c.restoreRequest = restoreRequest{}
@@ -138,7 +189,7 @@ func (c *Client) processTerminalResize(ctx context.Context, allowNormal bool) er
 	var err error
 	if manual {
 		err = c.applyRestoreManualResize(ctx)
-	} else if !c.restoreEnabled() && allowNormal {
+	} else if !acknowledged && !c.restoreEnabled() && allowNormal {
 		err = c.SendResize(ctx, cols, rows)
 	}
 	c.RenderCurrentFull()

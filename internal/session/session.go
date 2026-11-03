@@ -714,7 +714,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 					r.setTabSuppressed(activeID, false)
 					switch action {
 					case control.ActionSearch:
-						search.Begin(r.clock, showSearch)
+						search.Begin(r.clock, showSearch, activeID)
 						showSearch()
 						return true
 					case control.ActionHelp:

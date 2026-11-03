@@ -108,6 +108,7 @@ type Client struct {
 
 	mu                        sync.RWMutex
 	restoreMode               *atomic.Bool
+	restoreWindow             *restoreWindow
 	restoreOnce               sync.Once
 	geometry                  *clientGeometry
 	restoreRequest            restoreRequest // protected by renderMu
@@ -129,6 +130,7 @@ type Client struct {
 	scrollbackView            mvu.ScrollbackViewport
 	scrollbackLive            *protocolpb.Snapshot // immutable grid aligned with scrollbackBuffer
 	scrollbackPending         int                  // rows received since the canonical live frame
+	scrollbackReplacement     *mvu.ProtoScrollbackBuffer
 	renderMu                  sync.Mutex
 	writeMu                   sync.Mutex
 	renderReqMu               sync.Mutex
@@ -1119,6 +1121,16 @@ func (c *Client) handleScrollback(scrollback *protocolpb.Scrollback) {
 	if c.scrollbackBuffer == nil {
 		c.scrollbackBuffer = mvu.NewProtoScrollbackBuffer(config.DefaultScrollbackLines)
 	}
+	// Clear starts a replacement transaction, terminated by its full live
+	// snapshot. Continuation chunks refill history; they are not new output.
+	if scrollback.Clear {
+		c.scrollbackReplacement = mvu.NewProtoScrollbackBuffer(config.DefaultScrollbackLines)
+	}
+	if c.scrollbackReplacement != nil {
+		c.scrollbackReplacement.Apply(scrollback)
+		c.scrollbackMu.Unlock()
+		return
+	}
 	before := c.scrollbackBuffer.Position()
 	c.scrollbackBuffer.Apply(scrollback)
 	after := c.scrollbackBuffer.Position()
@@ -1155,6 +1167,9 @@ func (c *Client) syncScrollbackLocked() {
 }
 
 func (c *Client) updateScrollbackSnapshotLocked() {
+	if c.scrollbackReplacement != nil {
+		return
+	}
 	c.scrollbackPending = 0
 	if c.scrollbackView.Active() {
 		c.scrollbackLive = c.snapshotOrBlank()
@@ -1311,6 +1326,10 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.resyncRequested = false
 	c.forceFreshHello = false
 	c.mu.Unlock()
+	if c.scrollbackReplacement != nil {
+		c.scrollbackBuffer.Apply(&protocolpb.Scrollback{Clear: true, Cols: snap.Cols, Rows: c.scrollbackReplacement.Rows()})
+		c.scrollbackReplacement = nil
+	}
 	c.updateScrollbackSnapshotLocked()
 	visible := c.scrollbackView.Visible()
 	c.scrollbackMu.Unlock()
@@ -2430,7 +2449,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 				}
 				switch action {
 				case control.ActionSearch:
-					search.Begin(c.clock(), showSearch)
+					search.Begin(c.clock(), showSearch, c.SessionID)
 					showSearch()
 					return true
 				case control.ActionToggleRestore:

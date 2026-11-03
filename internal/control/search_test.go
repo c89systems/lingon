@@ -10,7 +10,7 @@ import (
 func TestSearchCompletionAndCycling(t *testing.T) {
 	sessions := []SearchSession{{"a", "alpha"}, {"b", "alpine"}, {"c", "beta"}, {"d", "beta"}}
 	var p SearchPrompt
-	p.Begin(clock.NewMock(), nil)
+	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
 	for _, b := range []byte("al") {
 		p.Feed(b, sessions)
@@ -30,6 +30,38 @@ func TestSearchCompletionAndCycling(t *testing.T) {
 	}
 	if result := p.Feed('\r', sessions); result.SessionID != "a" || !result.Consumed || p.View(sessions).Active {
 		t.Fatalf("selection %+v", result)
+	}
+}
+
+func TestEmptySearchCyclesRelativeToOrigin(t *testing.T) {
+	sessions := []SearchSession{{"a", "alpha"}, {"b", "same"}, {"c", "same"}, {"d", "delta"}}
+	for _, tc := range []struct{ origin, keys, want string }{
+		{"b", "\t", "c"}, {"b", "\x1b[Z", "a"},
+		{"d", "\t", "a"}, {"a", "\x1b[Z", "d"},
+		{"b", "\t\x1b[Z", "b"}, {"b", "\x1b[Z\t", "b"},
+		{"removed", "\t", "a"}, {"removed", "\x1b[Z", "d"},
+	} {
+		t.Run(tc.origin+tc.keys, func(t *testing.T) {
+			var p SearchPrompt
+			p.Begin(clock.NewMock(), nil, tc.origin)
+			defer p.Close()
+			if view := p.View(sessions); view.CandidateID != "" || view.Text != "" {
+				t.Fatal("empty search previewed the origin")
+			}
+			for _, b := range []byte(tc.keys) {
+				p.Feed(b, sessions)
+			}
+			if got := p.Feed('\r', sessions).SessionID; got != tc.want {
+				t.Fatalf("selected %s, want %s", got, tc.want)
+			}
+		})
+	}
+	var p SearchPrompt
+	p.Begin(clock.NewMock(), nil, "a")
+	defer p.Close()
+	p.Feed('\t', sessions[:1])
+	if got := p.Feed('\r', sessions[:1]).SessionID; got != "a" {
+		t.Fatal("single session failed to wrap to itself")
 	}
 }
 
@@ -53,7 +85,7 @@ func TestSearchEnterExactGhostDuplicateAndMissing(t *testing.T) {
 			var p SearchPrompt
 			clk := clock.NewMock()
 			changed := make(chan struct{}, 1)
-			p.Begin(clk, func() { changed <- struct{}{} })
+			p.Begin(clk, func() { changed <- struct{}{} }, "")
 			defer p.Close()
 			var result SearchResult
 			for _, b := range []byte(tc.keys) {
@@ -73,20 +105,20 @@ func TestSearchEnterExactGhostDuplicateAndMissing(t *testing.T) {
 
 func TestSearchRefreshAndSafeText(t *testing.T) {
 	var p SearchPrompt
-	p.Begin(clock.NewMock(), nil)
+	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
 	sessions := []SearchSession{{"a", "alpha"}, {"b", "beta"}}
 	p.Feed('\t', sessions)
 	if result := p.Feed('\r', sessions[1:]); result.SessionID != "" || !p.View(sessions[1:]).Active {
 		t.Fatalf("selected removed session %+v", result)
 	}
-	p.Begin(clock.NewMock(), nil)
+	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
 	p.Feed('\t', []SearchSession{{"a", "a\x1b[2J\n"}})
 	if view := p.View(nil); view.Text != "a[2J" {
 		t.Fatalf("unsafe text %q", view.Text)
 	}
-	p.Begin(clock.NewMock(), nil)
+	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
 	p.Feed('\t', nil)
 	if result := p.Feed('\r', nil); result.SessionID != "" || !p.View(nil).Active {
@@ -107,7 +139,7 @@ func TestSearchAndRestorePrefix(t *testing.T) {
 func TestSearchCandidateIdentityFollowsEditingAndDuplicateCycling(t *testing.T) {
 	items := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "alpha"}, {ID: "c", Name: "beta"}}
 	var prompt SearchPrompt
-	prompt.Begin(clock.NewMock(), nil)
+	prompt.Begin(clock.NewMock(), nil, "")
 	defer prompt.Close()
 	if prompt.View(items).CandidateID != "" {
 		t.Fatal("empty search highlighted a session")
@@ -150,7 +182,7 @@ func TestSearchReverseCycling(t *testing.T) {
 		t.Run(tc.keys, func(t *testing.T) {
 			var p SearchPrompt
 			clk := clock.NewMock()
-			p.Begin(clk, nil)
+			p.Begin(clk, nil, "")
 			defer p.Close()
 			for _, b := range []byte(tc.keys) {
 				p.Feed(b, sessions)
@@ -186,7 +218,7 @@ func TestSearchShiftTabFragmentedInput(t *testing.T) {
 		t.Run(string(rune('0'+split)), func(t *testing.T) {
 			clk := clock.NewMock()
 			var p SearchPrompt
-			p.Begin(clk, func() { t.Error("Shift+Tab cancelled search") })
+			p.Begin(clk, func() { t.Error("Shift+Tab cancelled search") }, "")
 			defer p.Close()
 			for _, b := range []byte("\x1b[Z")[:split] {
 				p.Feed(b, sessions)
@@ -212,7 +244,7 @@ func TestSearchEscapeCancellation(t *testing.T) {
 			clk := clock.NewMock()
 			changed := make(chan struct{}, 1)
 			var p SearchPrompt
-			p.Begin(clk, func() { changed <- struct{}{} })
+			p.Begin(clk, func() { changed <- struct{}{} }, "")
 			defer p.Close()
 			for _, b := range []byte(prefix) {
 				p.Feed(b, nil)
@@ -246,7 +278,7 @@ func TestSearchOtherEscapeSequences(t *testing.T) {
 	for _, keys := range []string{"\x1b[A", "\x1bOA", "\x1b[1;2D"} {
 		t.Run(keys, func(t *testing.T) {
 			var p SearchPrompt
-			p.Begin(clock.NewMock(), nil)
+			p.Begin(clock.NewMock(), nil, "")
 			defer p.Close()
 			for _, b := range []byte(keys) {
 				if !p.Feed(b, nil).Consumed {
@@ -262,7 +294,7 @@ func TestSearchOtherEscapeSequences(t *testing.T) {
 		})
 	}
 	var p SearchPrompt
-	p.Begin(clock.NewMock(), nil)
+	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
 	p.Feed(0x1b, nil)
 	if r := p.Feed('x', nil); r.Consumed || !r.Changed || p.View(nil).Active {
@@ -273,14 +305,14 @@ func TestSearchOtherEscapeSequences(t *testing.T) {
 func TestSearchEscapeTimerLifecycle(t *testing.T) {
 	clk := clock.NewMock()
 	var p SearchPrompt
-	p.Begin(clk, func() { t.Error("old Escape callback fired") })
+	p.Begin(clk, func() { t.Error("old Escape callback fired") }, "")
 	p.Feed(0x1b, nil)
-	p.Begin(clk, nil)
+	p.Begin(clk, nil, "")
 	clk.Add(time.Second)
 	if !p.View(nil).Active {
 		t.Fatal("old timer cancelled new search")
 	}
-	p.Begin(clk, func() { t.Error("closed search callback fired") })
+	p.Begin(clk, func() { t.Error("closed search callback fired") }, "")
 	p.Feed(0x1b, nil)
 	p.Close()
 	clk.Add(time.Second)

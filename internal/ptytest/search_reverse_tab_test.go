@@ -16,7 +16,7 @@ func TestSearchShiftTabCyclesBackwardHostAndAttachPTY(t *testing.T) {
 			if useAttach {
 				prefix = ""
 			}
-			terminal.Send("\x0c/\t")
+			terminal.Send("\x0c/al\t")
 			searchField(t, terminal, "/ alpha")
 			for i := 6; i >= 2; i-- {
 				terminal.Send("\x1b[Z")

@@ -35,6 +35,7 @@ type SearchPrompt struct {
 	mu           sync.Mutex
 	editor       RenamePrompt
 	selected     string
+	origin       string
 	completed    bool
 	escapePrefix int
 	escapeTimer  *clock.Timer
@@ -44,12 +45,14 @@ type SearchPrompt struct {
 
 // Begin starts a fresh search. onChange redraws after a standalone Escape expires;
 // ordinary input reports changes through Feed instead. A nil clock uses real time.
-func (p *SearchPrompt) Begin(clk clock.Clock, onChange func()) {
+// currentID anchors cycling when the field is empty without previewing that tab.
+func (p *SearchPrompt) Begin(clk clock.Clock, onChange func(), currentID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stopEscape()
 	p.editor.Begin("", clk)
 	p.selected, p.completed = "", false
+	p.origin = currentID
 	p.onChange = onChange
 }
 
@@ -134,6 +137,13 @@ func (p *SearchPrompt) cycle(sessions []SearchSession, direction int) {
 	if ok {
 		for i, session := range sessions {
 			if session.ID == candidate.ID {
+				next = (i + direction + len(sessions)) % len(sessions)
+				break
+			}
+		}
+	} else if len(p.editor.text) == 0 {
+		for i, session := range sessions {
+			if session.ID == p.origin {
 				next = (i + direction + len(sessions)) % len(sessions)
 				break
 			}

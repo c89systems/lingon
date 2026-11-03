@@ -224,6 +224,8 @@ func testScrollbackFrameOrder(t *testing.T, mode, delivery string) {
 	}
 	terminal.DrainRaw()
 	send(&protocolpb.Frame{Payload: &protocolpb.Frame_Scrollback{Scrollback: &protocolpb.Scrollback{Cols: 60, Rows: replacement, Clear: true}}})
+	// Replacement history becomes visible with its terminating live snapshot.
+	send(&protocolpb.Frame{Payload: &protocolpb.Frame_Snapshot{Snapshot: next}})
 	waitSearchScreen(t, terminal, func(s ptytest.Screen) bool {
 		return strings.Contains(s.Row(1), "REPLACEMENT-01") && strings.Contains(s.Row(0), "[0%]")
 	})
