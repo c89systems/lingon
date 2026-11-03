@@ -36,6 +36,7 @@ import (
 	"pkt.systems/lingon/internal/mvu"
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/relayclient"
+	"pkt.systems/lingon/internal/render"
 	"pkt.systems/lingon/internal/retryafter"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/theme"
@@ -115,8 +116,6 @@ type Client struct {
 	restoreManual             terminal.WindowSize
 	searchBaseline            *protocolpb.Snapshot // protected by renderMu
 	lastSnapshot              *protocolpb.Snapshot
-	lastSnapshotPosition      mvu.ScrollbackPosition
-	snapshotPositionKnown     bool
 	lastSeq                   uint64
 	needsResync               bool
 	resyncRequested           bool
@@ -1104,55 +1103,60 @@ func (c *Client) setReadErr(err error) {
 	c.readErr = err
 }
 
-func (c *Client) handleScrollback(history *protocolpb.Scrollback) {
-	if history == nil {
+func (c *Client) handleScrollback(scrollback *protocolpb.Scrollback) {
+	if scrollback == nil {
 		return
 	}
+	snapshotRows := c.renderSnapshotRows()
 	c.scrollbackMu.Lock()
 	if c.scrollbackBuffer == nil {
 		c.scrollbackBuffer = mvu.NewProtoScrollbackBuffer(config.DefaultScrollbackLines)
 	}
-	c.scrollbackBuffer.Apply(history)
-	c.updateScrollbackLocked(c.snapshotOrBlank(), mvu.ScrollbackUpdate{})
+	c.scrollbackBuffer.Apply(scrollback)
+	viewRows := c.scrollbackViewRows()
+	if viewRows <= 0 {
+		viewRows = snapshotRows
+	}
+	if viewRows <= 0 {
+		viewRows = config.DefaultTerminalRows
+	}
+	totalRows := c.scrollbackBuffer.Len() + snapshotRows
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	c.scrollbackMu.Unlock()
 }
 
-// Data and navigation are reduced before any View is requested. The snapshot's
-// history coordinate keeps separate transport messages from producing a torn grid.
-func (c *Client) updateScrollbackLocked(snap *protocolpb.Snapshot, msg mvu.ScrollbackUpdate) bool {
-	cols, rows := c.terminalSize()
-	c.mu.RLock()
-	livePosition := c.scrollbackBuffer.Position()
-	if c.lastSnapshot != nil {
-		snap = c.lastSnapshot
-		if c.snapshotPositionKnown {
-			livePosition = c.lastSnapshotPosition
-		}
-	}
-	c.mu.RUnlock()
-	if cols <= 0 {
-		cols = int(snap.GetCols())
-	}
-	if rows <= 0 {
-		rows = int(snap.GetRows())
-	}
-	var history []*protocolpb.ScrollbackRow
-	if c.scrollbackView.Active() || msg.Operation == mvu.ScrollbackEnter {
-		history = c.scrollbackBuffer.Rows()
-	}
-	data := mvu.ScrollbackContent{SessionID: c.SessionID, Live: snap, History: mvu.NewProtoScrollbackSource(history), Position: c.scrollbackBuffer.Position(), LivePosition: livePosition, Cols: cols, Rows: rows}
-	msg.Content = &data
-	return c.scrollbackView.Update(msg)
-}
 func (c *Client) setScrollbackActive(active bool) {
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
-	operation := mvu.ScrollbackExit
-	if active {
-		operation = mvu.ScrollbackEnter
+	if !active {
+		c.scrollbackView.SetActive(false)
+		c.setScrollbackMouseActive(false)
+		return
 	}
-	c.updateScrollbackLocked(c.snapshotOrBlank(), mvu.ScrollbackUpdate{Operation: operation})
-	c.setScrollbackMouseActive(active)
+	snap := c.snapshotOrBlank()
+	viewCols, viewRows := c.terminalSize()
+	if viewCols <= 0 {
+		viewCols = int(snap.Cols)
+	}
+	if viewRows <= 0 {
+		viewRows = int(snap.Rows)
+	}
+	totalRows := int(snap.Rows)
+	scrollRows := []*protocolpb.ScrollbackRow(nil)
+	if c.scrollbackBuffer != nil {
+		scrollRows = c.scrollbackBuffer.Rows()
+		totalRows += len(scrollRows)
+	}
+	contentCols := protoScrollbackContentWidth(scrollRows, snap)
+	colOffset, liveOriginRow := render.ViewportOriginForSnapshot(snap, viewCols, viewRows)
+	rowOffset := int(snap.Rows) - viewRows - liveOriginRow
+	if rowOffset < 0 {
+		rowOffset = 0
+	}
+	c.scrollbackView.EnterAt(totalRows, viewRows, rowOffset, contentCols, viewCols, colOffset)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.setScrollbackMouseActive(true)
 }
 
 func (c *Client) setScrollbackMouseActive(active bool) {
@@ -1162,15 +1166,37 @@ func (c *Client) setScrollbackMouseActive(active bool) {
 	c.scrollbackMouse.Set(active)
 }
 
-func (c *Client) scrollbackPage(delta, stepRows int) bool {
+func (c *Client) scrollbackPage(delta int, stepRows int) bool {
+	snapshotRows := c.renderSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
-	return c.updateScrollbackLocked(c.snapshotOrBlank(), mvu.ScrollbackUpdate{Operation: mvu.ScrollbackPage, Delta: delta, Step: stepRows})
+	viewRows := c.scrollbackViewRows()
+	if viewRows <= 0 {
+		return false
+	}
+	totalRows := snapshotRows
+	if c.scrollbackBuffer != nil {
+		totalRows += c.scrollbackBuffer.Len()
+	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
+	return c.scrollbackView.Page(totalRows, viewRows, delta, stepRows)
 }
+
 func (c *Client) scrollbackPanX(delta int) bool {
+	snapshotRows := c.renderSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
-	return c.updateScrollbackLocked(c.snapshotOrBlank(), mvu.ScrollbackUpdate{Operation: mvu.ScrollbackPan, Delta: delta})
+	totalRows := snapshotRows
+	if c.scrollbackBuffer != nil {
+		totalRows += c.scrollbackBuffer.Len()
+	}
+	viewRows := c.scrollbackViewRows()
+	viewCols := c.scrollbackViewCols()
+	contentCols := protoScrollbackContentWidthLocked(c)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
+	return c.scrollbackView.PanX(contentCols, viewCols, delta)
 }
 
 // ReadErr returns the first websocket read error, if any.
@@ -1218,13 +1244,8 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	if snap == nil {
 		return
 	}
-	c.scrollbackMu.RLock()
-	position := c.scrollbackBuffer.Position()
-	c.scrollbackMu.RUnlock()
 	c.mu.Lock()
 	c.lastSnapshot = snap
-	c.lastSnapshotPosition = position
-	c.snapshotPositionKnown = true
 	if seq != 0 {
 		c.lastSeq = seq
 	}
@@ -1232,6 +1253,9 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.resyncRequested = false
 	c.forceFreshHello = false
 	c.mu.Unlock()
+	c.renderMu.Lock()
+	c.renderCache.Reset()
+	c.renderMu.Unlock()
 	c.requestRenderCurrent()
 	c.markReady()
 }
@@ -1250,9 +1274,6 @@ func (c *Client) Snapshot() *protocolpb.Snapshot {
 }
 
 func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
-	c.scrollbackMu.RLock()
-	position := c.scrollbackBuffer.Position()
-	c.scrollbackMu.RUnlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1291,7 +1312,7 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 		}
 	}
 
-	snap := cloneSnapshot(c.lastSnapshot)
+	snap := c.lastSnapshot
 	if len(snap.Graphemes) == 0 {
 		for _, row := range diff.DiffRows {
 			if len(row.Graphemes) > 0 {
@@ -1331,9 +1352,6 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 	snap.CursorVisible = diff.CursorVisible
 	snap.Mode = diff.Mode
 	snap.Title = diff.Title
-	c.lastSnapshot = snap
-	c.lastSnapshotPosition = position
-	c.snapshotPositionKnown = true
 	return snap
 }
 
@@ -1354,14 +1372,32 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 		cols, rows = int(snap.Cols), int(snap.Rows)
 	}
 	c.scrollbackMu.Lock()
-	c.updateScrollbackLocked(snap, mvu.ScrollbackUpdate{})
-	viewport := c.scrollbackView.View()
+	var scrollRows []*protocolpb.ScrollbackRow
+	if c.scrollbackBuffer != nil {
+		scrollRows = c.scrollbackBuffer.Rows()
+	}
+	totalRows := len(scrollRows) + int(snap.Rows)
+	contentCols := protoScrollbackContentWidth(scrollRows, snap)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(totalRows, rows, contentCols, cols)
+	scrollOffset := c.scrollbackView.Offset()
+	scrollCol := c.scrollbackView.Column()
+	scrollActive := c.scrollbackView.Active()
+	scrollbackVisible := c.scrollbackView.Visible()
+	scrollPercent := c.scrollbackView.Percent(totalRows, rows)
 	c.scrollbackMu.Unlock()
-	viewSnap := viewport.Snapshot
-	scrollActive, scrollbackVisible := viewport.Active, viewport.Visible
+	viewSnap := snap
+	if scrollActive || scrollOffset > 0 {
+		viewSnap = mvu.BuildScrollbackViewFromProto(cols, rows, scrollRows, snap, scrollOffset, scrollCol)
+	}
 	compositor := c.ensureCompositor()
+	if scrollbackVisible {
+		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: true, Percent: scrollPercent})
+	} else {
+		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: false})
+	}
 	if c.renderDisabled {
-		c.renderDisabledSnapshot(viewSnap, &viewport)
+		c.renderDisabledSnapshot(viewSnap)
 		return
 	}
 	now := c.clock().Now()
@@ -1386,7 +1422,6 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	}
 	frame, err := compositor.RenderAttachFrame(mvu.RuntimeAttachFrameInput{
 		Snapshot:          viewSnap,
-		Scrollback:        &viewport,
 		Cols:              cols,
 		Rows:              rows,
 		Cursor:            cursor,
@@ -1547,17 +1582,36 @@ func (c *Client) ScrollbackPanX(delta int) bool {
 }
 
 // ScrollbackTop jumps to the start of the scrollback buffer.
-func (c *Client) ScrollbackTop(_ int) {
+func (c *Client) ScrollbackTop(viewRows int) {
+	snapshotRows := c.renderSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
-	c.updateScrollbackLocked(c.snapshotOrBlank(), mvu.ScrollbackUpdate{Operation: mvu.ScrollbackTop})
+	totalRows := snapshotRows
+	if c.scrollbackBuffer != nil {
+		totalRows += c.scrollbackBuffer.Len()
+	}
+	contentCols := protoScrollbackContentWidthLocked(c)
+	viewCols := c.scrollbackViewCols()
+	if viewRows <= 0 {
+		viewRows = c.scrollbackViewRows()
+	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
+	c.scrollbackView.Top(totalRows, viewRows)
 }
 
-// ScrollbackBottom selects the current bottom without exiting the mode.
+// ScrollbackBottom jumps back to the live view position.
 func (c *Client) ScrollbackBottom() {
+	snapshotRows := c.renderSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
-	c.updateScrollbackLocked(c.snapshotOrBlank(), mvu.ScrollbackUpdate{Operation: mvu.ScrollbackBottom})
+	totalRows := snapshotRows
+	if c.scrollbackBuffer != nil {
+		totalRows += c.scrollbackBuffer.Len()
+	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(totalRows, c.scrollbackViewRows(), protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
+	c.scrollbackView.Bottom()
 }
 
 // ScrollbackReset exits scrollback mode and returns to live view.
@@ -1580,6 +1634,17 @@ func (c *Client) ScrollbackOffset() int {
 	return c.scrollbackView.Offset()
 }
 
+func (c *Client) scrollbackViewCols() int {
+	cols, _ := c.terminalSize()
+	if cols > 0 {
+		return cols
+	}
+	if c.lastSnapshot != nil && c.lastSnapshot.Cols > 0 {
+		return int(c.lastSnapshot.Cols)
+	}
+	return config.DefaultTerminalCols
+}
+
 func (c *Client) scrollbackViewRows() int {
 	_, rows := c.terminalSize()
 	if rows > 0 {
@@ -1591,18 +1656,40 @@ func (c *Client) scrollbackViewRows() int {
 	return config.DefaultTerminalRows
 }
 
+func protoScrollbackContentWidth(scrollRows []*protocolpb.ScrollbackRow, snap *protocolpb.Snapshot) int {
+	width := 0
+	if snap != nil {
+		width = int(snap.Cols)
+	}
+	for _, row := range scrollRows {
+		if row == nil {
+			continue
+		}
+		for _, candidate := range []int{len(row.Runes), len(row.Modes), len(row.Fg), len(row.Bg), len(row.Graphemes)} {
+			if candidate > width {
+				width = candidate
+			}
+		}
+	}
+	return width
+}
+
+func protoScrollbackContentWidthLocked(c *Client) int {
+	var rows []*protocolpb.ScrollbackRow
+	if c.scrollbackBuffer != nil {
+		rows = c.scrollbackBuffer.Rows()
+	}
+	return protoScrollbackContentWidth(rows, c.lastSnapshot)
+}
+
 // RenderDisabled redraws the terminal in a dimmed style for deactivated views.
 func (c *Client) RenderDisabled() {
 	c.renderMu.Lock()
 	defer c.renderMu.Unlock()
-	c.scrollbackMu.Lock()
-	c.updateScrollbackLocked(c.snapshotOrBlank(), mvu.ScrollbackUpdate{})
-	viewport := c.scrollbackView.View()
-	c.scrollbackMu.Unlock()
-	c.renderDisabledSnapshot(viewport.Snapshot, &viewport)
+	c.renderDisabledSnapshot(c.snapshotOrBlank())
 }
 
-func (c *Client) renderDisabledSnapshot(snap *protocolpb.Snapshot, viewport *mvu.ScrollbackFrame) {
+func (c *Client) renderDisabledSnapshot(snap *protocolpb.Snapshot) {
 	if snap == nil {
 		return
 	}
@@ -1616,7 +1703,6 @@ func (c *Client) renderDisabledSnapshot(snap *protocolpb.Snapshot, viewport *mvu
 	now := c.clock().Now()
 	frame, err := compositor.RenderDisabledFrame(mvu.RuntimeDisabledFrameInput{
 		Snapshot:          snap,
-		Scrollback:        viewport,
 		Cols:              cols,
 		Rows:              rows,
 		Cursor:            cursor,
@@ -1633,7 +1719,7 @@ func (c *Client) renderDisabledSnapshot(snap *protocolpb.Snapshot, viewport *mvu
 }
 
 func (c *Client) snapshotOrBlank() *protocolpb.Snapshot {
-	if snap := c.getSnapshot(); snap != nil {
+	if snap := c.Snapshot(); snap != nil {
 		return snap
 	}
 	cols, rows := c.terminalSize()

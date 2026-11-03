@@ -2453,9 +2453,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			pending = append(pending, out...)
 			return true
 		}
-		// Reduce each key before routing the next one. In particular, mode entry
-		// and exit can share an input read with navigation or application input.
-		for i, b := range data {
+		filtered := make([]byte, 0, len(data))
+		allHandledByScrollback := true
+		for _, b := range data {
 			_, client, _, _, _ := activeViewSnapshot()
 			if client != nil && client.ScrollbackActive() {
 				cmd := scrollState.feed(b)
@@ -2513,18 +2513,15 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				}
 				continue
 			}
-			filtered := data[i : i+1]
-			if !flushMouse {
-				filtered = mouseFilter.feed(filtered)
-			}
-			filtered = terminal.TranslateAppCursorKeys(filtered, client != nil && client.appCursorActive())
-			for _, fb := range filtered {
-				if !processNormalByte(fb) {
-					return nil
-				}
-			}
+			allHandledByScrollback = false
+			filtered = append(filtered, b)
 		}
+		if allHandledByScrollback {
+			continue
+		}
+		_, client, _, _, _ := activeViewSnapshot()
 		if !flushMouse {
+			filtered = mouseFilter.feed(filtered)
 			if mouseFilter.ambiguous() {
 				if mouseTimer == nil {
 					mouseTimer = m.Clock.NewTimer(50 * time.Millisecond)
@@ -2535,6 +2532,12 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			} else if mouseTimer != nil {
 				mouseTimer.Stop()
 				mouseTimerCh = nil
+			}
+		}
+		filtered = terminal.TranslateAppCursorKeys(filtered, client != nil && client.appCursorActive())
+		for _, fb := range filtered {
+			if !processNormalByte(fb) {
+				return nil
 			}
 		}
 		if !flushPending() {
