@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const githubRepository = "sa6mwa/lingon"
+const githubRepository = "c89systems/lingon"
 
 type publication struct {
 	Git, GitHub, Container bool

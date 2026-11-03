@@ -76,6 +76,78 @@ class AppViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     @Test
+    fun closedSessionIDStartsWithFreshTerminalAndReplayCursorWhenReused() = runTest {
+        val sessions = listOf(RelaySession(id = "reused", name = "Build", status = "active"), RelaySession(id = "survivor", name = "Other", status = "active"))
+        val repository = FakeRepository(sessions = sessions, failListSessions = false)
+        val wsClient = FakeWsClient { options, listener, socket ->
+            listener.onOpen(socket)
+            listener.onFrame(socket, welcomeFrame())
+            listener.onFrame(socket, snapshotFrame(17, if (options.sessionId == "reused") "old contents: exit" else "survivor contents"))
+        }
+        val model = AppViewModel(repository, wsClient, ioDispatcher = StandardTestDispatcher(testScheduler))
+        runCurrent()
+        setUiStateForTest(model, model.state.value.copy(loggedIn = true, sessions = sessions, activeSessionId = "reused", endpoint = "https://localhost:12843/v1"))
+        model.selectSession("reused")
+        runCurrent()
+        wsClient.fireConnect()
+        runCurrent()
+        assertEquals("old contents: exit", model.state.value.activeSnapshot?.title)
+        wsClient.fireFrame(scrollbackFrame(18))
+        runCurrent()
+        model.adjustScrollback(1)
+        assertTrue(model.state.value.scrollbackOffsetRows > 0)
+        wsClient.fireFrame(Frame.newBuilder().setSessionId("reused").setSeq(19)
+            .setSessionClosed(SessionClosed.newBuilder().setReason("exited")).build())
+        runCurrent()
+        assertEquals("survivor", model.state.value.activeSessionId)
+        wsClient.fireConnect()
+        runCurrent()
+        wsClient.fireFrame(sessionsFrame("reused", "survivor"))
+        runCurrent()
+        model.selectSession("reused")
+        runCurrent()
+        assertNull("closed terminal was resurrected while connecting", model.state.value.activeSnapshot)
+        assertEquals(0, model.state.value.scrollbackOffsetRows)
+        assertEquals(0L, wsClient.lastConnectOptions?.lastSeq)
+        wsClient.fireFrame(snapshotFrame(20, "new contents"))
+        runCurrent()
+        assertEquals("reused", model.state.value.activeSessionId)
+        assertEquals("new contents", model.state.value.activeSnapshot?.title)
+        assertEquals(0, model.state.value.scrollbackOffsetRows)
+        invokeOnClearedForTest(model)
+    }
+
+    @Test
+    fun replacementWithSameDisplayNameAndDifferentIDUsesItsOwnTerminal() = runTest {
+        val sessions = listOf(RelaySession(id = "old-id", name = "Build", status = "active"), RelaySession(id = "new-id", name = "Build", status = "active"))
+        val repository = FakeRepository(sessions = sessions, failListSessions = false)
+        val wsClient = FakeWsClient { options, listener, socket ->
+            listener.onOpen(socket)
+            listener.onFrame(socket, welcomeFrame())
+            listener.onFrame(socket, snapshotFrame(7, options.sessionId.orEmpty()))
+        }
+        val model = AppViewModel(repository, wsClient, ioDispatcher = StandardTestDispatcher(testScheduler))
+        runCurrent()
+        setUiStateForTest(model, model.state.value.copy(loggedIn = true, sessions = sessions, activeSessionId = "old-id", endpoint = "https://localhost:12843/v1"))
+        model.selectSession("old-id")
+        runCurrent()
+        wsClient.fireConnect()
+        runCurrent()
+        assertEquals("old-id", model.state.value.activeSnapshot?.title)
+        wsClient.fireFrame(Frame.newBuilder().setSessionId("old-id").setSeq(8)
+            .setSessionClosed(SessionClosed.newBuilder().setReason("exited")).build())
+        runCurrent()
+        assertEquals("new-id", model.state.value.activeSessionId)
+        assertEquals(0L, wsClient.lastConnectOptions?.lastSeq)
+        assertNull(model.state.value.activeSnapshot)
+        wsClient.fireConnect()
+        runCurrent()
+        assertEquals("new-id", model.state.value.activeSnapshot?.title)
+        assertEquals("Build", model.state.value.sessions.single().name)
+        invokeOnClearedForTest(model)
+    }
+
+    @Test
     fun activeSessionClosureSelectsSurvivorAfterSuspendedPreferenceRead() = runTest {
         val sessions = listOf(
             RelaySession(id = "first", name = "First", status = "active"),
@@ -3360,17 +3432,17 @@ private fun diffFrame(seq: Long, title: String): Frame {
         .build()
 }
 
-private fun sessionsFrame(sessionId: String): Frame {
+private fun sessionsFrame(vararg sessionIds: String): Frame {
     return Frame.newBuilder()
         .setSessions(
             Sessions.newBuilder()
-                .addSessions(
+                .addAllSessions(sessionIds.map { sessionId ->
                     SessionInfo.newBuilder()
                         .setId(sessionId)
                         .setName(sessionId)
                         .setStatus("active")
-                        .build(),
-                )
+                        .build()
+                })
                 .build(),
         )
         .build()

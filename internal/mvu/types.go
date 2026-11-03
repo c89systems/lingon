@@ -20,6 +20,7 @@ type State struct {
 	Theme     theme.TUITheme
 
 	HelpVisible bool
+	Search      SearchState
 
 	ConnectionMessage   string
 	ConnectionStyle     BannerStyle
@@ -49,8 +50,11 @@ type State struct {
 
 // Tab describes a session tab.
 type Tab struct {
+	ID    string
 	Index int
 	Title string
+	// Highlighted marks a search candidate independently of the active session.
+	Highlighted bool
 	// Disabled indicates the tab is paused/disconnected locally.
 	Disabled bool
 	// Muted indicates the tab should render with reduced emphasis.

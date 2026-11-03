@@ -359,7 +359,36 @@ func (h *Host) readWS(ctx context.Context, ws *websocket.Conn, ptyFile *os.File,
 }
 
 func (h *Host) writeFrames(ctx context.Context, ws *websocket.Conn, ctrlFrames <-chan *protocolpb.Frame, outputQueue *relaywire.FrameQueue) error {
+	replacing := false
+	writeControl := func(frame *protocolpb.Frame) error {
+		if frame == nil {
+			return nil
+		}
+		if frame.GetScrollback().GetClear() {
+			replacing = true
+		}
+		if err := relaywire.WriteFrame(ctx, ws, frame); err != nil {
+			return err
+		}
+		if frame.GetSnapshot() != nil {
+			replacing = false
+		}
+		return nil
+	}
 	for {
+		// A replacement is one history/live transaction. Its control chunks can
+		// arrive incrementally; ordinary output must wait for the live snapshot.
+		if replacing {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case frame := <-ctrlFrames:
+				if err := writeControl(frame); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -372,10 +401,13 @@ func (h *Host) writeFrames(ctx context.Context, ws *websocket.Conn, ctrlFrames <
 			if frame == nil {
 				continue
 			}
-			if err := relaywire.WriteFrame(ctx, ws, frame); err != nil {
+			if err := writeControl(frame); err != nil {
 				return err
 			}
 		default:
+		}
+		if replacing {
+			continue
 		}
 
 		if frame := outputQueue.Pop(); frame != nil {
@@ -392,7 +424,7 @@ func (h *Host) writeFrames(ctx context.Context, ws *websocket.Conn, ctrlFrames <
 			if frame == nil {
 				continue
 			}
-			if err := relaywire.WriteFrame(ctx, ws, frame); err != nil {
+			if err := writeControl(frame); err != nil {
 				return err
 			}
 		case <-outputQueue.Notify():

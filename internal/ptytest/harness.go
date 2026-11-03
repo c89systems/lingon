@@ -24,6 +24,7 @@ import (
 	"pkt.systems/lingon/internal/clock"
 	"pkt.systems/lingon/internal/desktopnotify"
 	"pkt.systems/lingon/internal/netgate"
+	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/relay"
 	"pkt.systems/lingon/internal/relayclient"
 	"pkt.systems/lingon/internal/server"
@@ -452,14 +453,20 @@ func (h *Harness) startProxy() {
 
 // HostOptions configures a PTY-backed host session.
 type HostOptions struct {
-	ClipboardReader             clipboard.Reader
-	SessionID                   string
-	SessionName                 string
-	Shell                       string
-	Cols                        int
-	Rows                        int
-	Clock                       clock.Clock
-	OnPTYRead                   func([]byte)
+	// Geometry overrides host startup dimensions independently of the owned outer PTY.
+	Geometry *terminal.WindowSize
+	// AllowRemoteResize publishes a headless-style viewport that controllers may resize.
+	AllowRemoteResize bool
+	ClipboardReader   clipboard.Reader
+	SessionID         string
+	SessionName       string
+	Shell             string
+	Cols              int
+	Rows              int
+	Clock             clock.Clock
+	OnPTYRead         func([]byte)
+	// OnPublishFrame observes frames before transport queueing.
+	OnPublishFrame              func(*protocolpb.Frame)
 	OnPublishStatus             func(session.PublishStatus)
 	DisableRaw                  bool
 	DisablePublish              bool
@@ -539,8 +546,14 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 		authFile = h.authPath
 	}
 	disableDesktopNotifications, desktopNotifier := effectiveHostDesktopNotificationConfig(opts)
+	hostCols, hostRows := opts.Cols, opts.Rows
+	if opts.Geometry != nil {
+		hostCols, hostRows = opts.Geometry.Cols, opts.Geometry.Rows
+	}
 	resizeCh := make(chan struct{}, 1)
 	runner := session.New(session.Options{
+		AllowRemoteResize:           opts.AllowRemoteResize,
+		OnPublishFrame:              opts.OnPublishFrame,
 		ClipboardReader:             opts.ClipboardReader,
 		Endpoint:                    h.endpoint,
 		Token:                       token,
@@ -548,8 +561,8 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 		TLSDir:                      h.tlsDir,
 		SessionID:                   opts.SessionID,
 		SessionName:                 opts.SessionName,
-		Cols:                        opts.Cols,
-		Rows:                        opts.Rows,
+		Cols:                        hostCols,
+		Rows:                        hostRows,
 		Shell:                       opts.Shell,
 		Publish:                     !opts.DisablePublish,
 		Stdin:                       slave,
@@ -584,8 +597,28 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 	return sess
 }
 
+func geometryCols(size *terminal.WindowSize) int {
+	if size == nil {
+		return 0
+	}
+	return size.Cols
+}
+
+func geometryRows(size *terminal.WindowSize) int {
+	if size == nil {
+		return 0
+	}
+	return size.Rows
+}
+
 // AttachOptions configures a PTY-backed attach client.
 type AttachOptions struct {
+	// OnFrame observes incoming frames before handling, for ordered test barriers.
+	OnFrame func(*protocolpb.Frame)
+	// Geometry overrides logical startup dimensions without resizing the owned outer PTY.
+	Geometry *terminal.WindowSize
+	// Restore enables remote-size following in this test-owned PTY.
+	Restore         bool
 	ClipboardReader clipboard.Reader
 	SessionID       string
 	ClientID        string
@@ -671,6 +704,9 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 		opts.DesktopNotifier,
 	)
 	client := &attach.Client{
+		OnFrame: opts.OnFrame,
+		Restore: opts.Restore,
+		Cols:    geometryCols(opts.Geometry), Rows: geometryRows(opts.Geometry),
 		ClipboardReader:             opts.ClipboardReader,
 		Endpoint:                    h.endpoint,
 		SessionID:                   opts.SessionID,
@@ -725,6 +761,10 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 
 // MultiAttachOptions configures a PTY-backed multi-session attach client.
 type MultiAttachOptions struct {
+	// Geometry overrides logical startup dimensions without resizing the owned outer PTY.
+	Geometry *terminal.WindowSize
+	// Restore enables remote-size following in this test-owned PTY.
+	Restore   bool
 	SessionID string
 	Cols      int
 	Rows      int
@@ -816,6 +856,8 @@ func (h *Harness) StartMultiAttach(opts MultiAttachOptions) *PTYSession {
 		opts.DesktopNotifier,
 	)
 	client := &attach.MultiClient{
+		Restore: opts.Restore,
+		Cols:    geometryCols(opts.Geometry), Rows: geometryRows(opts.Geometry),
 		Endpoint:                    endpoint,
 		TLSDir:                      h.tlsDir,
 		AccessToken:                 token,

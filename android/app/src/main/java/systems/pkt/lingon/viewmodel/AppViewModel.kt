@@ -1158,6 +1158,9 @@ class AppViewModel(
         val remaining = before.sessions.filterNot { it.id == sessionId }
         sessionListCache.remove(sessionId)
         missingSessionSinceMs.remove(sessionId)
+        // An explicit closure ends this terminal's lifetime. A later session may
+        // reuse its ID, but must not inherit its replay cursor or scrollback.
+        sessionCaches.remove(sessionId)
         val wasActive = before.activeSessionId == sessionId || activeConnection?.sessionId == sessionId
         if (wasActive) {
             stopReconnect()
@@ -1478,6 +1481,7 @@ class AppViewModel(
                                 handleExplicitSessionClosed(closedSessionId.trim())
                             }.join()
                         }
+                        if (isStale(webSocket)) return@onCurrent
                         _state.update {
                             it.copy(
                                 lastFrameSeq = frame.seq,

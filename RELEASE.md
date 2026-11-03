@@ -6,6 +6,9 @@ root on Linux. Commands, suites, builds, and publication steps are serial even
 under `make -j`. Child commands have null stdin and their own process sessions;
 interactive tests retain their test-owned PTYs. Full logs and bounded command
 tails are retained under ignored `build/lifecycle/`.
+Each command records UTC start/finish timestamps, elapsed time and success or
+failure in that log. Named gate commands also report their duration as they
+finish. These timings leave captured command output and test receipts intact.
 
 Lint uses the repository-pinned golangci-lint version through
 `scripts/golangci-lint.sh`, built with the active Go toolchain. Its first run
@@ -52,6 +55,8 @@ inside a release attempt.
 `make prerelease` runs the full proof and an incremental artifact rehearsal.
 `make test-all` uses the same graph. Neither squashes, tags, pushes, nor publishes.
 Untagged rehearsals use `0.0.0`; that version cannot be published.
+Release preparation performs its own final proof; running `make prerelease`
+immediately before it adds a separate full rehearsal rather than reusing proof.
 
 During remediation, reproduce and verify each defect with its focused regression
 and affected component checks. Stabilize those isolated checks before starting
@@ -127,9 +132,11 @@ tags do not affect stable ordering. Discuss breaking changes and major-version
 decisions explicitly. Android version codes use `major*1000000+minor*1000+patch`;
 each component must be less than 1000 and the result must fit Android's limit.
 
-The command reports its local plan, runs the complete candidate rehearsal, checks
-that candidate/trunk/remote inputs stayed pinned, squashes onto `trunk` as one
-Conventional Commit, and proves that the resulting tree equals the tested tree.
+The command reports its local plan and runs cheap candidate preflight checks:
+formatting, repository hygiene, and required PTY shell/pager availability. It
+checks that candidate/trunk/remote inputs stayed pinned, squashes onto `trunk`
+as one Conventional Commit, and proves that the resulting tree equals the
+candidate tree. Expensive tests and artifact builds run only after tagging.
 It preserves the source branch. It creates a lightweight tag with signing
 disabled for the tag (`git -c tag.gpgSign=false tag v1.2.3`). Annotated/signed tags,
 multiple exact stable tags and inferred historical versions cannot establish a
@@ -144,8 +151,9 @@ choosing a new stable version. It does not establish a release identity for
 publication; official artifacts still use the explicitly selected release.
 
 After tagging, the command cleans release-owned outputs and the Android build,
-runs the entire proof again, and rebuilds/verifies the final matrix. Only this
-successful final tagged gate records full proof. `make release-matrix` provides
+runs the entire proof once, and builds/verifies the final matrix once. Every
+required test group remains in that final proof. Only a successful final tagged
+gate records full proof. `make release-matrix` provides
 an incremental artifact rehearsal; it cannot create publishable proof.
 `make package-verify` checks existing artifacts without rebuilding them.
 
@@ -210,7 +218,7 @@ The release reference is `docker.io/pktsystems/lingon:vX.Y.Z`.
 
 Run `make publish` only when publication of the selected release is authorized.
 Preparation itself never pushes. GitHub CLI and Docker Hub authentication must
-already be configured. `origin` must target `github.com/sa6mwa/lingon`.
+already be configured. `origin` must target `github.com/c89systems/lingon`.
 
 Enable GitHub release immutability once in the repository settings; publication
 checks it before any push and never changes settings implicitly. The GitHub

@@ -4160,6 +4160,71 @@ class EndToEndTest {
     }
 
     @Test
+    fun replaced_session_with_reused_name_shows_only_new_terminal() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        val id = startHostsViaHarness(count = 1, shell = "/bin/sh").single()
+        waitUntilNoError(20_000L) { appViewModel().state.value.sessions.any { it.id == id } }
+        selectSessionTab(id, timeoutMs = SHORT_UI_TIMEOUT_MS)
+        sendTerminalInput("echo OLD_SESSION_$(echo CONTENT)")
+        sendTerminalEnter()
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("OLD_SESSION_CONTENT") }
+        sendTerminalInput("exit")
+        sendTerminalEnter()
+        waitUntilNoError(20_000L) {
+            val state = appViewModel().state.value
+            state.activeSessionId != id && state.sessions.none { it.id == id }
+        }
+        // Remove the exited fixture's handle before reusing its exact ID/name.
+        stopHostsViaHarness(listOf(id))
+        assertEquals(id, startHostsViaHarness(count = 1, shell = "/bin/sh", initialLines = 3, sessionId = id).single())
+        waitUntilNoError(20_000L) { appViewModel().state.value.sessions.any { it.id == id } }
+        selectSessionTab(id, timeoutMs = SHORT_UI_TIMEOUT_MS)
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("LINE_${id} 002") }
+        assertFalse("replacement restored the terminated terminal", snapshotContainsToken("OLD_SESSION_CONTENT"))
+        sendTerminalInput("echo NEW_SESSION_$(echo CONTENT)")
+        sendTerminalEnter()
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+            appViewModel().state.value.activeSessionId == id && snapshotContainsToken("NEW_SESSION_CONTENT")
+        }
+        assertFalse(snapshotContainsToken("OLD_SESSION_CONTENT"))
+        assertEquals(0, appViewModel().state.value.scrollbackOffsetRows)
+    }
+
+    @Test
+    fun reused_session_clears_old_scrollback_when_closure_was_missed() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        val survivor = appViewModel().state.value.activeSessionId ?: throw AssertionError("missing survivor")
+        val id = startHostsViaHarness(count = 1, shell = "/bin/sh", initialLines = 80).single()
+        waitUntilNoError(20_000L) { appViewModel().state.value.sessions.any { it.id == id } }
+        selectSessionTab(id, timeoutMs = SHORT_UI_TIMEOUT_MS)
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("LINE_${id} 079") }
+        composeRule.runOnIdle { appViewModel().adjustScrollback(3) }
+        assertTrue(appViewModel().state.value.scrollbackOffsetRows > 0)
+        selectSessionTab(survivor, timeoutMs = SHORT_UI_TIMEOUT_MS)
+        // Android has no socket for the old host now, so it cannot receive its
+        // explicit close. Retain the cached scrolled view while replacing it.
+        stopHostsViaHarness(listOf(id))
+        waitUntilNoError(20_000L) { appViewModel().state.value.sessions.none { it.id == id } }
+        assertEquals(id, startHostsViaHarness(count = 1, shell = "/bin/sh", sessionId = id).single())
+        waitUntilNoError(20_000L) { appViewModel().state.value.sessions.any { it.id == id } }
+        selectSessionTab(id, timeoutMs = SHORT_UI_TIMEOUT_MS)
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+            appViewModel().state.value.scrollbackOffsetRows == 0 && !snapshotContainsToken("LINE_${id} 079")
+        }
+        sendTerminalInput("echo REPLACEMENT_$(echo READY)")
+        sendTerminalEnter()
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+            appViewModel().state.value.activeSessionId == id && snapshotContainsToken("REPLACEMENT_READY")
+        }
+    }
+
+    @Test
     fun background_foreground_resumes_input() {
         setEndpoint(testConfig.endpoint)
         ensureLoggedOut()
@@ -6994,10 +7059,12 @@ class EndToEndTest {
         rows: Int = testConfig.hostRows,
         shell: String? = null,
         initialLines: Int = 0,
+        sessionId: String? = null,
     ): List<String> {
         val shellQuery = shell?.takeIf { it.isNotBlank() }?.let { "&shell=${java.net.URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
         val initialLinesQuery = if (initialLines > 0) "&initial_lines=$initialLines" else ""
-        val url = URL("${testConfig.endpoint.trimEnd('/')}/__harness/start-host?count=$count&cols=$cols&rows=$rows$shellQuery$initialLinesQuery")
+        val identityQuery = sessionId?.let { "&session_id=${java.net.URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
+        val url = URL("${testConfig.endpoint.trimEnd('/')}/__harness/start-host?count=$count&cols=$cols&rows=$rows$shellQuery$initialLinesQuery$identityQuery")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 5_000

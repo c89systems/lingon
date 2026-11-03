@@ -20,6 +20,8 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	var shareToken string
 	var accessToken string
 	var requestControl bool
+	var restore bool
+	var cols, rows int
 	var pick bool
 	var authFile string
 	var logFile string
@@ -38,10 +40,15 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	v.SetDefault("terminal.disable_desktop_notifications", lingon.DefaultTerminalDisableDesktopNotifications)
 
 	cmd := &cobra.Command{
-		Use:   "attach [session-id]",
-		Short: "Attach to a Lingon session",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "attach [session-id]",
+		Aliases: []string{"a"},
+		Short:   "Attach to a Lingon session",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			colsValue, rowsValue, err := resolveAttachSize(cmd, cols, rows)
+			if err != nil {
+				return err
+			}
 			headlessMode, err := cmd.Flags().GetBool("headless")
 			if err != nil {
 				return err
@@ -138,6 +145,8 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 					}
 				}
 				err = lingon.Attach(cmd.Context(), lingon.AttachOptions{
+					Cols: colsValue, Rows: rowsValue,
+					Restore:                     restore,
 					Endpoint:                    "local://headless",
 					SessionID:                   sessionID,
 					HeadlessConfigDir:           configDirForLoader(loader),
@@ -231,6 +240,8 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 				sessionID = sessions[0].ID
 			}
 			err = lingon.Attach(cmd.Context(), lingon.AttachOptions{
+				Cols: colsValue, Rows: rowsValue,
+				Restore:                     restore,
 				Endpoint:                    endpointValue,
 				SessionID:                   sessionID,
 				AccessToken:                 tokenValue,
@@ -255,6 +266,10 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
+	flags.IntVar(&cols, "cols", 0, "resize local terminal and remote session columns (0 keeps the local width; applied before --restore)")
+	flags.IntVar(&rows, "rows", 0, "resize local terminal and remote session rows (0 keeps the local height; applied before --restore)")
+	flags.StringP(geometryFlagName, "g", "", "resize local terminal and remote session to COLSxROWS (overrides --cols/--rows; applied before --restore)")
+	flags.BoolVarP(&restore, "restore", "r", false, "restore each session's window size; manual resizing updates that session (Ctrl+L ! toggles)")
 	flags.StringVarP(&endpoint, "endpoint", "e", lingon.DefaultClientEndpoint, "relay endpoint (https/wss base URL; assumes https:// if omitted)")
 	flags.StringVarP(&shareToken, "token", "t", "", "share token for anonymous attach")
 	flags.StringVar(&accessToken, "access-token", "", "access token for authenticated attach")

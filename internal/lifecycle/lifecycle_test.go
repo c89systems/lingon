@@ -332,16 +332,16 @@ func TestExactLightweightVersionAndNoVersionInference(t *testing.T) {
 	}
 }
 
-func TestCandidateFailureStopsBeforeSquashTagAndPublish(t *testing.T) {
+func TestPreflightFailureStopsBeforeSquashTagAndPublish(t *testing.T) {
 	w, f := testWorkflow(t)
 	before := testGit(t, w, "rev-parse", "trunk")
-	f.fail = "go test -count=1"
+	f.fail = "bash scripts/check-hygiene.sh"
 	err := w.release(context.Background(), Options{Version: "1.2.3", Message: "feat(fixture): add behavior"})
-	if err == nil || !strings.Contains(err.Error(), "Go tests") {
+	if err == nil || !strings.Contains(err.Error(), "repository hygiene") {
 		t.Fatalf("unexpected failure: %v", err)
 	}
 	if testGit(t, w, "rev-parse", "trunk") != before || testGit(t, w, "tag", "--list") != "" {
-		t.Fatal("release mutated trunk/tags after a failed candidate gate")
+		t.Fatal("release mutated trunk/tags after failed preflight")
 	}
 	for _, c := range f.calls {
 		if c.Name == "gh" || c.Name == "podman" {

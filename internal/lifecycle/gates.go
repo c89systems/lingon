@@ -33,11 +33,16 @@ func gradleGate(name string, tasks ...string) gate {
 	return gate{name: name, dir: "android", tool: "./gradlew", args: append(args, tasks...)}
 }
 
-func proofGates() []gate {
+func preflightGates() []gate {
 	return []gate{
 		{name: "repository hygiene", tool: "bash", args: []string{"scripts/check-hygiene.sh"}},
 		{name: "PTY shell prerequisite", tool: "/bin/bash", args: []string{"--version"}},
 		{name: "PTY pager prerequisite", tool: "less", args: []string{"--version"}},
+	}
+}
+
+func proofGates() []gate {
+	return append(preflightGates(), []gate{
 		{name: "module integrity", tool: "go", args: []string{"mod", "verify"}},
 		{name: "vet", tool: "go", args: []string{"vet", "./..."}},
 		{name: "golint", tool: "golint", args: []string{"-set_exit_status", "./..."}},
@@ -61,10 +66,18 @@ func proofGates() []gate {
 			"LINGON_IT_ONLY": "", "LINGON_IT_CLASS": "__ALL_NON_E2E__", "LINGON_IT_CLEARTEXT": "0", "LINGON_IT_KEEP_EMULATOR": "0", "LINGON_IT_REUSE_DEVICE": "0", "LINGON_IT_CPU_QUOTA_PERCENT": "400", "LINGON_IT_MEMORY_MAX": "4G",
 		}},
 		{name: "performance observations", tool: "go", args: []string{"test", "./internal/relay", "./internal/terminal/emu", "-run=^$", "-bench=Benchmark(WSReplay|AbsoluteCursorPositionScrollRegion)$", "-benchmem", "-benchtime=1s", "-count=3"}},
-	}
+	}...)
 }
 
 func (w *workflow) proof(ctx context.Context, commit string) error {
+	return w.runGates(ctx, commit, proofGates())
+}
+
+func (w *workflow) preflight(ctx context.Context, commit string) error {
+	return w.runGates(ctx, commit, preflightGates())
+}
+
+func (w *workflow) runGates(ctx context.Context, commit string, gates []gate) error {
 	branch, err := w.git(ctx, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		return err
@@ -81,7 +94,7 @@ func (w *workflow) proof(ctx context.Context, commit string) error {
 	if strings.TrimSpace(string(out)) != "" {
 		return fmt.Errorf("formatting gate failed:\n%s", out)
 	}
-	for _, g := range proofGates() {
+	for _, g := range gates {
 		fmt.Printf("Gate: %s\n", g.name)
 		env := make(map[string]string)
 		for key, value := range goEnvironment {
@@ -97,7 +110,7 @@ func (w *workflow) proof(ctx context.Context, commit string) error {
 			}
 			env["LINGON_IT_CLASS"] = classes
 		}
-		out, err := w.r.run(ctx, command{Dir: filepath.Join(w.root, g.dir), Name: g.tool, Args: g.args, Env: env})
+		out, err := w.r.run(ctx, command{Dir: filepath.Join(w.root, g.dir), Name: g.tool, Label: g.name, Args: g.args, Env: env})
 		if err != nil {
 			return fmt.Errorf("gate %q: %w", g.name, err)
 		}

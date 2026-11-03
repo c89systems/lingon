@@ -41,6 +41,10 @@ const (
 	ActionScrollback
 	// ActionResizeHeadless resizes the active headless remote session to the local viewport.
 	ActionResizeHeadless
+	// ActionSearch opens the session search field.
+	ActionSearch
+	// ActionToggleRestore toggles attachment terminal size restoration.
+	ActionToggleRestore
 )
 
 // Prefix tracks ctrl+l command state.
@@ -91,6 +95,10 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionNextTheme, nil
 		case '[':
 			return ActionScrollback, nil
+		case '/':
+			return ActionSearch, nil
+		case '!':
+			return ActionToggleRestore, nil
 		case '0', 0:
 			return ActionResizeHeadless, nil
 		case CtrlL:

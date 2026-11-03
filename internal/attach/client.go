@@ -60,12 +60,16 @@ type Client struct {
 	AccessToken    string
 	ShareToken     string
 	RequestControl bool
-	HostnameOnly   bool
-	TLSDir         string
-	Insecure       bool
-	UnixSocket     string
-	Theme          string
-	ClientID       string
+	// Restore requests that the local terminal follow remote viewport dimensions.
+	Restore bool
+	// Cols and Rows size the initial viewport before Restore follows session sizes.
+	Cols, Rows   int
+	HostnameOnly bool
+	TLSDir       string
+	Insecure     bool
+	UnixSocket   string
+	Theme        string
+	ClientID     string
 	// AllowOfflineToggle permits Ctrl+L o to be forwarded to a local host transport.
 	AllowOfflineToggle bool
 	// DisableDesktopNotifications suppresses best-effort desktop notifications for inactivity walls.
@@ -103,6 +107,15 @@ type Client struct {
 	holderID string
 
 	mu                        sync.RWMutex
+	restoreMode               *atomic.Bool
+	restoreWindow             *restoreWindow
+	restoreOnce               sync.Once
+	geometry                  *clientGeometry
+	restoreRequest            restoreRequest // protected by renderMu
+	restoreInitialized        bool
+	restoreLocal              terminal.WindowSize
+	restoreManual             *terminal.WindowSizeRequest // shared across same-session reconnects
+	searchBaseline            *protocolpb.Snapshot        // protected by renderMu
 	lastSnapshot              *protocolpb.Snapshot
 	lastSeq                   uint64
 	needsResync               bool
@@ -115,6 +128,9 @@ type Client struct {
 	scrollbackMu              sync.RWMutex
 	scrollbackBuffer          *mvu.ProtoScrollbackBuffer
 	scrollbackView            mvu.ScrollbackViewport
+	scrollbackLive            *protocolpb.Snapshot // immutable grid aligned with scrollbackBuffer
+	scrollbackPending         int                  // rows received since the canonical live frame
+	scrollbackReplacement     *mvu.ProtoScrollbackBuffer
 	renderMu                  sync.Mutex
 	writeMu                   sync.Mutex
 	renderReqMu               sync.Mutex
@@ -213,6 +229,7 @@ func (c *Client) RunDetached(ctx context.Context) error {
 }
 
 func (c *Client) run(ctx context.Context, opts runOptions) error {
+	c.restoreState()
 	if c.Logger == nil {
 		c.Logger = logging.Default()
 	}
@@ -287,6 +304,19 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 	if cols == 0 || rows == 0 {
 		cols, rows = config.DefaultTerminalCols, config.DefaultTerminalRows
 	}
+	c.renderMu.Lock()
+	if c.restoreLocal == (terminal.WindowSize{}) {
+		c.restoreLocal = terminal.WindowSize{Cols: cols, Rows: rows}
+	}
+	c.renderMu.Unlock()
+	if c.geometry == nil && (c.Cols != 0 || c.Rows != 0) {
+		var err error
+		c.geometry, err = newClientGeometry(c.Cols, c.Rows, cols, rows, c.Restore)
+		if err != nil {
+			return err
+		}
+	}
+	c.geometry.bindInitialSession(c.SessionID)
 
 	dialOptions := &websocket.DialOptions{HTTPClient: &http.Client{}}
 	if c.UnixSocket != "" {
@@ -375,6 +405,12 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 		c.Logger.Debug("attach.client.hello", "session", c.SessionID, "client", c.ClientID, "last_seq", lastSeq)
 	}
 	if err := c.writeFrame(ctx, ws, hello); err != nil {
+		return err
+	}
+	if err := c.applyGeometry(ctx); err != nil {
+		return err
+	}
+	if err := c.applyRestoreManualResize(ctx); err != nil {
 		return err
 	}
 
@@ -686,7 +722,14 @@ func (c *Client) markReady() {
 // SetStdout overrides the writer used for rendering snapshots.
 func (c *Client) SetStdout(w io.Writer) {
 	c.renderMu.Lock()
+	changedVisibility := (c.stdoutWriter() == io.Discard) != (w == io.Discard)
 	c.stdout = w
+	if changedVisibility {
+		c.restoreRequest = restoreRequest{}
+		c.restoreInitialized = false
+		cols, rows := c.terminalSize()
+		c.restoreLocal = terminal.WindowSize{Cols: cols, Rows: rows}
+	}
 	c.renderMu.Unlock()
 }
 
@@ -718,7 +761,8 @@ func (c *Client) SetRenderDisabled(disabled bool) {
 	c.renderMu.Unlock()
 }
 
-// SeedFrom copies the last known snapshot/sequence from a previous client.
+// SeedFrom carries same-session snapshot, render and pending resize state across
+// reconnects. A different session inherits only the client identity.
 func (c *Client) SeedFrom(prev *Client) {
 	if prev == nil {
 		return
@@ -738,7 +782,10 @@ func (c *Client) SeedFrom(prev *Client) {
 	if prev.SessionID != c.SessionID {
 		return
 	}
+	prev.restoreState()
+	c.restoreState()
 	prev.renderMu.Lock()
+	manual := prev.restoreManual
 	renderCache := prev.renderCache
 	renderCache.PrevSnapshot = cloneSnapshot(renderCache.PrevSnapshot)
 	prev.renderMu.Unlock()
@@ -749,6 +796,7 @@ func (c *Client) SeedFrom(prev *Client) {
 	c.resyncRequested = false
 	c.mu.Unlock()
 	c.renderMu.Lock()
+	c.restoreManual = manual
 	c.renderCache = renderCache
 	c.renderMu.Unlock()
 }
@@ -840,6 +888,9 @@ func (c *Client) SendCommand(ctx context.Context, kind protocolpb.CommandKind) e
 
 // SendResize forwards a resize request to the server.
 func (c *Client) SendResize(ctx context.Context, cols, rows int) error {
+	if c.restoreEnabled() {
+		return nil
+	}
 	if cols <= 0 || rows <= 0 {
 		return nil
 	}
@@ -878,7 +929,13 @@ func (c *Client) ForceTabsVisibleOnce() {
 func (c *Client) RenderCurrentFull() {
 	c.renderMu.Lock()
 	defer c.renderMu.Unlock()
-	c.renderCache.Reset()
+	c.scrollbackMu.Lock()
+	c.syncScrollbackLocked()
+	visible := c.scrollbackView.Visible()
+	c.scrollbackMu.Unlock()
+	if !visible {
+		c.renderCache.Reset()
+	}
 	c.forceClear = false
 	c.renderSnapshotLocked(c.snapshotOrBlank())
 }
@@ -1065,19 +1122,86 @@ func (c *Client) handleScrollback(scrollback *protocolpb.Scrollback) {
 	if scrollback == nil {
 		return
 	}
-	snapshotRows := c.renderSnapshotRows()
 	c.scrollbackMu.Lock()
 	if c.scrollbackBuffer == nil {
 		c.scrollbackBuffer = mvu.NewProtoScrollbackBuffer(config.DefaultScrollbackLines)
 	}
-	c.scrollbackBuffer.Apply(scrollback)
-	viewRows := snapshotRows
-	if viewRows <= 0 {
-		viewRows = config.DefaultTerminalRows
+	// Clear starts a replacement transaction, terminated by its full live
+	// snapshot. Continuation chunks refill history; they are not new output.
+	if scrollback.Clear {
+		c.scrollbackReplacement = mvu.NewProtoScrollbackBuffer(config.DefaultScrollbackLines)
 	}
-	totalRows := c.scrollbackBuffer.Len() + snapshotRows
-	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
+	if c.scrollbackReplacement != nil {
+		c.scrollbackReplacement.Apply(scrollback)
+		c.scrollbackMu.Unlock()
+		return
+	}
+	before := c.scrollbackBuffer.Position()
+	c.scrollbackBuffer.Apply(scrollback)
+	after := c.scrollbackBuffer.Position()
+	if after.Generation != before.Generation {
+		c.scrollbackPending = 0
+	} else {
+		c.scrollbackPending += after.End - before.End
+	}
+	if c.scrollbackView.Active() {
+		if after.Generation != before.Generation {
+			c.scrollbackLive = c.snapshotOrBlank()
+		} else {
+			c.scrollbackLive = shiftScrollbackLive(c.scrollbackLive, after.End-before.End)
+		}
+		c.syncScrollbackLocked()
+	}
 	c.scrollbackMu.Unlock()
+}
+
+func (c *Client) syncScrollbackLocked() {
+	snap := c.scrollbackLive
+	if snap == nil || !c.scrollbackView.Active() {
+		return
+	}
+	cols, rows := c.terminalSize()
+	if cols <= 0 {
+		cols = int(snap.Cols)
+	}
+	if rows <= 0 {
+		rows = int(snap.Rows)
+	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.Normalize(c.scrollbackBuffer.Len()+int(snap.Rows), rows, protoScrollbackContentWidth(c.scrollbackBuffer.Rows(), snap), cols)
+}
+
+func (c *Client) updateScrollbackSnapshotLocked() {
+	if c.scrollbackReplacement != nil {
+		return
+	}
+	c.scrollbackPending = 0
+	if c.scrollbackView.Active() {
+		c.scrollbackLive = c.snapshotOrBlank()
+		c.syncScrollbackLocked()
+	}
+}
+
+// A history message precedes its live frame. Shift a separate immutable copy
+// so pinned live rows retain their coordinates without altering normal diffs.
+func shiftScrollbackLive(snap *protocolpb.Snapshot, rows int) *protocolpb.Snapshot {
+	if snap == nil || rows <= 0 {
+		return snap
+	}
+	next := cloneSnapshot(snap)
+	count := rows * int(snap.Cols)
+	shiftScrollbackCells(next.Runes, count)
+	shiftScrollbackCells(next.Modes, count)
+	shiftScrollbackCells(next.Fg, count)
+	shiftScrollbackCells(next.Bg, count)
+	shiftScrollbackCells(next.Graphemes, count)
+	return next
+}
+
+func shiftScrollbackCells[T any](cells []T, count int) {
+	count = min(count, len(cells))
+	copy(cells, cells[count:])
+	clear(cells[len(cells)-count:])
 }
 
 func (c *Client) setScrollbackActive(active bool) {
@@ -1085,10 +1209,12 @@ func (c *Client) setScrollbackActive(active bool) {
 	defer c.scrollbackMu.Unlock()
 	if !active {
 		c.scrollbackView.SetActive(false)
+		c.scrollbackLive = nil
 		c.setScrollbackMouseActive(false)
 		return
 	}
 	snap := c.snapshotOrBlank()
+	c.scrollbackLive = shiftScrollbackLive(snap, c.scrollbackPending)
 	viewCols, viewRows := c.terminalSize()
 	if viewCols <= 0 {
 		viewCols = int(snap.Cols)
@@ -1104,11 +1230,9 @@ func (c *Client) setScrollbackActive(active bool) {
 	}
 	contentCols := protoScrollbackContentWidth(scrollRows, snap)
 	colOffset, liveOriginRow := render.ViewportOriginForSnapshot(snap, viewCols, viewRows)
-	rowOffset := int(snap.Rows) - viewRows - liveOriginRow
-	if rowOffset < 0 {
-		rowOffset = 0
-	}
+	rowOffset := max(0, int(snap.Rows)-viewRows-liveOriginRow) + c.scrollbackPending
 	c.scrollbackView.EnterAt(totalRows, viewRows, rowOffset, contentCols, viewCols, colOffset)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.setScrollbackMouseActive(true)
 }
 
@@ -1131,6 +1255,7 @@ func (c *Client) scrollbackPage(delta int, stepRows int) bool {
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	return c.scrollbackView.Page(totalRows, viewRows, delta, stepRows)
 }
@@ -1146,6 +1271,7 @@ func (c *Client) scrollbackPanX(delta int) bool {
 	viewRows := c.scrollbackViewRows()
 	viewCols := c.scrollbackViewCols()
 	contentCols := protoScrollbackContentWidthLocked(c)
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	return c.scrollbackView.PanX(contentCols, viewCols, delta)
 }
@@ -1195,6 +1321,7 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	if snap == nil {
 		return
 	}
+	c.scrollbackMu.Lock()
 	c.mu.Lock()
 	c.lastSnapshot = snap
 	if seq != 0 {
@@ -1204,9 +1331,18 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.resyncRequested = false
 	c.forceFreshHello = false
 	c.mu.Unlock()
-	c.renderMu.Lock()
-	c.renderCache.Reset()
-	c.renderMu.Unlock()
+	if c.scrollbackReplacement != nil {
+		c.scrollbackBuffer.Apply(&protocolpb.Scrollback{Clear: true, Cols: snap.Cols, Rows: c.scrollbackReplacement.Rows()})
+		c.scrollbackReplacement = nil
+	}
+	c.updateScrollbackSnapshotLocked()
+	visible := c.scrollbackView.Visible()
+	c.scrollbackMu.Unlock()
+	if !visible {
+		c.renderMu.Lock()
+		c.renderCache.Reset()
+		c.renderMu.Unlock()
+	}
 	c.requestRenderCurrent()
 	c.markReady()
 }
@@ -1225,8 +1361,13 @@ func (c *Client) Snapshot() *protocolpb.Snapshot {
 }
 
 func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
+	c.scrollbackMu.Lock()
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer func() {
+		c.mu.Unlock()
+		c.updateScrollbackSnapshotLocked()
+		c.scrollbackMu.Unlock()
+	}()
 
 	if diff == nil {
 		return c.lastSnapshot
@@ -1313,6 +1454,9 @@ func (c *Client) renderSnapshot(snap *protocolpb.Snapshot) {
 }
 
 func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
+	if c.HasSnapshot() {
+		c.restoreTerminalLocked(snap)
+	}
 	forceFull := c.forceClear
 	c.forceClear = false
 	cols, rows := c.terminalSize()
@@ -1320,28 +1464,27 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 		cols, rows = int(snap.Cols), int(snap.Rows)
 	}
 	c.scrollbackMu.Lock()
+	if c.scrollbackView.Active() && c.scrollbackLive != nil {
+		snap = c.scrollbackLive
+	}
 	var scrollRows []*protocolpb.ScrollbackRow
 	if c.scrollbackBuffer != nil {
 		scrollRows = c.scrollbackBuffer.Rows()
 	}
 	totalRows := len(scrollRows) + int(snap.Rows)
-	contentCols := protoScrollbackContentWidth(scrollRows, snap)
-	c.scrollbackView.Normalize(totalRows, rows, contentCols, cols)
-	scrollOffset := c.scrollbackView.Offset()
+	scrollOffset := c.scrollbackView.OffsetFor(c.scrollbackBuffer.Position())
 	scrollCol := c.scrollbackView.Column()
 	scrollActive := c.scrollbackView.Active()
 	scrollbackVisible := c.scrollbackView.Visible()
-	scrollPercent := c.scrollbackView.Percent(totalRows, rows)
+	scrollPercent := mvu.ScrollbackPercent(totalRows, rows, scrollOffset)
 	c.scrollbackMu.Unlock()
 	viewSnap := snap
 	if scrollActive || scrollOffset > 0 {
 		viewSnap = mvu.BuildScrollbackViewFromProto(cols, rows, scrollRows, snap, scrollOffset, scrollCol)
 	}
 	compositor := c.ensureCompositor()
-	if scrollbackVisible {
-		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: true, Percent: scrollPercent})
-	} else {
-		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: false})
+	if c.stdoutWriter() != io.Discard {
+		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: scrollbackVisible, Percent: scrollPercent})
 	}
 	if c.renderDisabled {
 		c.renderDisabledSnapshot(viewSnap)
@@ -1542,6 +1685,7 @@ func (c *Client) ScrollbackTop(viewRows int) {
 	if viewRows <= 0 {
 		viewRows = c.scrollbackViewRows()
 	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	c.scrollbackView.Top(totalRows, viewRows)
 }
@@ -1555,6 +1699,7 @@ func (c *Client) ScrollbackBottom() {
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
+	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
 	c.scrollbackView.Normalize(totalRows, c.scrollbackViewRows(), protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	c.scrollbackView.Bottom()
 }
@@ -2122,6 +2267,10 @@ func (c *Client) helloLastSeq() uint64 {
 }
 
 func (c *Client) buildHelloFrame(cols, rows int) *protocolpb.Frame {
+	cols, rows = c.geometrySize(cols, rows)
+	if c.restoreEnabled() {
+		cols, rows = 0, 0
+	}
 	lastSeq := c.helloLastSeq()
 	return &protocolpb.Frame{
 		SessionId: c.SessionID,
@@ -2156,6 +2305,24 @@ func (c *Client) newClientID() string {
 func (c *Client) writeFrame(ctx context.Context, ws *websocket.Conn, frame *protocolpb.Frame) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	// Recheck at delivery: a normal-mode resize/resync may have waited behind
+	// earlier input while the user enabled restoration.
+	if c.restoreEnabled() {
+		if resize := frame.GetResize(); resize != nil && !resize.Explicit {
+			return nil
+		}
+		if frame.GetHello() != nil {
+			frame = proto.Clone(frame).(*protocolpb.Frame)
+			frame.GetHello().Cols, frame.GetHello().Rows = 0, 0
+		}
+	}
+	if !c.restoreEnabled() && c.geometry != nil && c.geometry.restoreSeed == nil && frame.GetResize() != nil {
+		cols, rows := c.terminalSize()
+		cols, rows = c.geometrySize(cols, rows)
+		frame = proto.Clone(frame).(*protocolpb.Frame)
+		frame.GetResize().Cols, frame.GetResize().Rows = uint32(cols), uint32(rows)
+		frame.GetResize().Explicit = true
+	}
 	if err := writeFrame(ctx, ws, frame); err != nil {
 		return err
 	}
@@ -2192,6 +2359,28 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 	buf := make([]byte, 1024)
 	prefill := make([]byte, 0, 1024)
 	var prefix control.Prefix
+	var search control.SearchPrompt
+	defer search.Close()
+	searchSessions := func() []control.SearchSession {
+		name := c.SessionID
+		state := c.readCompositorState()
+		if state.ActiveTab >= 0 && state.ActiveTab < len(state.Tabs) {
+			name = state.Tabs[state.ActiveTab].Title
+		}
+		return []control.SearchSession{{ID: c.SessionID, Name: name}}
+	}
+	// Serialize timer and input redraws so an older view cannot hide a new search.
+	var searchRenderMu sync.Mutex
+	showSearch := func() {
+		searchRenderMu.Lock()
+		defer searchRenderMu.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
+		items := searchSessions()
+		view := search.View(items)
+		c.renderSearch(mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
+	}
 	pending := make([]byte, 0, 2048)
 	var scrollState scrollInputState
 	for {
@@ -2232,6 +2421,15 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 			return true
 		}
 		processNormalByte := func(b byte) bool {
+			if search.HandlesInput() {
+				result := search.Feed(b, searchSessions())
+				if result.Changed {
+					showSearch()
+				}
+				if result.Consumed {
+					return true
+				}
+			}
 			helpVisible := c.helpVisible()
 			if action, ok := mvu.ActionForHelpDismissKey(helpVisible, b); ok {
 				c.applyCompositorAction(action)
@@ -2255,6 +2453,22 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return false
 				}
 				switch action {
+				case control.ActionSearch:
+					search.Begin(c.clock(), showSearch, c.SessionID)
+					showSearch()
+					return true
+				case control.ActionToggleRestore:
+					if c.toggleRestore() {
+						c.showInfoStatus("Restore: follow session size")
+					} else {
+						c.showInfoStatus("Restore off")
+						if !c.DisableResizePropagation {
+							cols, rows := c.terminalSize()
+							_ = c.SendResize(ctx, cols, rows)
+						}
+					}
+					c.renderCurrent()
+					return true
 				case control.ActionHelp:
 					c.applyCompositorAction(mvu.HelpVisibleAction{Visible: true})
 					c.renderCurrent()
@@ -2313,6 +2527,10 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 						c.showInfoStatus("offline toggle is host local-only")
 					}
 				case control.ActionResizeHeadless:
+					if c.restoreEnabled() {
+						_ = c.processTerminalResize(ctx, false)
+						return true
+					}
 					if c.DisableResizePropagation {
 						c.showInfoStatus("resize is headless-only")
 						return true
@@ -2625,26 +2843,15 @@ func (c *Client) handleResize(ctx context.Context, ws *websocket.Conn) {
 		case <-ctx.Done():
 			return
 		case <-ch:
-			cols, rows := c.terminalSize()
-			c.RenderCurrentFull()
-			if !c.DisableResizePropagation && c.isController() {
-				frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
-				_ = c.writeFrame(ctx, ws, frame)
-			}
+			_ = c.processTerminalResize(ctx, !c.DisableResizePropagation && c.isController())
 		case <-resizeEvents:
-			cols, rows := c.terminalSize()
-			c.RenderCurrentFull()
-			if !c.DisableResizePropagation && c.isController() {
-				frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
-				_ = c.writeFrame(ctx, ws, frame)
-			}
+			_ = c.processTerminalResize(ctx, !c.DisableResizePropagation && c.isController())
 		case <-c.controlCh:
-			if c.DisableResizePropagation || !c.isController() || ws == nil {
+			if c.restoreEnabled() || c.DisableResizePropagation || !c.isController() || ws == nil {
 				continue
 			}
 			cols, rows := c.terminalSize()
-			frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(cols), Rows: uint32(rows)}}}
-			_ = c.writeFrame(ctx, ws, frame)
+			_ = c.SendResize(ctx, cols, rows)
 		}
 	}
 }

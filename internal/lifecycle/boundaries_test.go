@@ -243,6 +243,10 @@ func TestPublicRunResolvesRootBeforeCreatingScratchAndHonorsLock(t *testing.T) {
 	if err != nil || len(logs) != 1 {
 		t.Fatalf("root log missing: %v %v", logs, err)
 	}
+	logData, err := os.ReadFile(logs[0])
+	if err != nil || !bytes.Contains(logData, []byte("Command started:")) || !bytes.Contains(logData, []byte("Command finished:")) || !bytes.Contains(logData, []byte("status=passed")) {
+		t.Fatalf("public lifecycle operation did not record command timings: %s, %v", logData, err)
+	}
 	lock := filepath.Join(w.work, "operation.lock")
 	writeTestFile(t, lock, []byte("owned running operation"))
 	if err := Run(context.Background(), Options{Root: root, Operation: "version"}); err == nil || !strings.Contains(err.Error(), "another lifecycle operation") {

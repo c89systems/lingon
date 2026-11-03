@@ -11,13 +11,17 @@ type RenderStateOptions struct {
 // PrepareRenderState applies MVU tab visibility policy and returns the state and
 // resolve options to use for a render frame, along with the next tab auto-hide delay.
 func (r *Runtime) PrepareRenderState(state State, cursor Cursor, now time.Time, opts RenderStateOptions) (State, ResolveOptions, time.Duration) {
+	if state.Search.Visible {
+		opts.SuppressTabs = false
+		opts.ForceTabsVisible = true
+	}
 	tabVisible, tabDelay := r.TabBarVisibility(state, cursor, now)
 	if opts.SuppressTabs {
 		tabVisible = false
 		tabDelay = 0
 	}
 	if opts.ForceTabsVisible {
-		tabVisible = state.TabBarVisible && len(state.Tabs) > 0
+		tabVisible = (state.TabBarVisible || state.Search.Visible) && len(state.Tabs) > 0
 		tabDelay = 0
 	}
 	renderState := state

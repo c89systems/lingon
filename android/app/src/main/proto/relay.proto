@@ -144,6 +144,8 @@ message Command {
 message Resize {
   uint32 cols = 1;
   uint32 rows = 2;
+  // Explicit user geometry may also resize an interactive host's window.
+  bool explicit = 3;
 }
 
 message Control {

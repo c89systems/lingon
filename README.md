@@ -252,7 +252,7 @@ Interactive host options (selection):
 - `--token` access token (overrides stored auth)
 - `--auth-file` path to auth file
 - `--shell` override login shell path
-- `-g, --geometry` terminal size as `COLSxROWS`, for example `80x24`; overrides `--cols`/`--rows`
+- `-g, --geometry` terminal size as `COLSxROWS`, for example `80x24`; resizes the interactive terminal window and PTY; overrides `--cols`/`--rows`
 - `--cols`, `--rows` terminal size (`0` means auto-detect for interactive host; built-in default for headless)
 - `--scrollback-lines` scrollback lines
 - `--term` TERM value for the PTY
@@ -292,6 +292,8 @@ Headless local mode notes:
 
 ### Attach
 
+`a` is an alias for `attach`, for example `lingon a -r prod-shell`.
+
 Attach to a session over a TUI client:
 
 ```bash
@@ -311,6 +313,85 @@ use `--endpoint`, configured `client.endpoint`, or the built-in default.
 When switching local headless tabs, a session awaiting its first snapshot keeps
 the displayed contents under a loading banner. Its first snapshot replaces the
 contents; tab switching does not clear the screen.
+
+#### Browse live scrollback
+
+Press `Ctrl+l [` in the interactive host or `lingon attach` to browse scrollback.
+Output keeps filling the buffer while the rows you are viewing stay in place.
+Navigation moves that anchor; `End` or `G` jumps to the newest content without
+leaving scrollback mode. Later output accumulates below that position. If the
+history limit removes the anchored text, the view clamps to the oldest retained
+rows. Press `q` or Escape to return to the live screen.
+
+#### Find a session
+
+In the interactive host and `lingon attach`, press `Ctrl+l /` to open a search
+field at the bottom left. Type a case-sensitive session-name prefix; the rest
+of the suggested name appears in gray. Enter accepts the suggestion and opens
+that exact session. Tab first fills the suggestion; further Tab presses cycle
+through session names in tab order, wrapping at the end. Tab on an empty field
+starts with the first tab. Shift+Tab cycles in reverse, wrapping from the first
+tab to the last; on an empty field it starts with the last tab. Like Tab, it
+first fills an incomplete suggestion. An exact typed name takes precedence
+over longer prefix matches. Duplicate names remain separate selectable sessions.
+
+Search keeps the current session active until Enter. Escape or Ctrl+C cancels;
+Backspace edits the prefix. Enter with no matching session leaves the field
+open. This is a desktop terminal feature; Android is unchanged.
+
+The search candidate is marked with brackets in the tab bar. Brackets replace
+the label's surrounding spaces, keeping its text and neighboring tabs in place.
+The bar scrolls to keep the candidate visible as you type or cycle with Tab.
+Search temporarily shows the bar even when it is hidden. Cancellation restores
+the active tab and prior bar visibility. Outside search, the bar scrolls
+automatically to keep the active tab visible when switching tabs or resizing
+the window.
+
+#### Restore the remote terminal size
+
+`lingon attach -g 100x50 [session-id]` (also `lingon a`) requests that size
+for both the local terminal window and remote session. `--cols` and `--rows`
+set individual dimensions; an unspecified or zero dimension uses the local
+terminal size. Geometry overrides those flags. Explicit sizing also resizes an
+interactive remote host's terminal window, overriding its usual viewport
+protection. It applies to the selected tab and follows tab switches; after the
+local window acknowledges the request, manual resizing resumes. If a terminal
+refuses the request, Lingon warns and preserves the requested remote size.
+Both ends must run a version supporting explicit geometry.
+
+`lingon -g 100x50`, `--cols` and `--rows` likewise request the interactive host
+window size. Detached headless startup sets only its PTY size.
+
+`lingon attach -r [session-id]` (or `--restore`) requests a local terminal window
+matching the selected session's viewport. It works with relay sessions,
+share tokens and local `attach -x`. Press `Ctrl+l !` to toggle the mode while
+attached. Restoration runs on entry and when switching tabs. Manually resizing
+your window updates only the selected remote session, including interactive
+hosts; switching away and back restores that session's new size. Other sessions
+keep their own dimensions. Acknowledging Lingon's window request does not resize
+the remote session. Turning restoration off resumes the usual resize policy:
+remote headless sessions follow the local viewport; interactive hosts retain
+their own size.
+When combined with `--restore`, geometry, `--cols` and `--rows` initialize the
+initially selected remote session first. Lingon waits for its resized grid, then
+restores the local window to that size and continues as an ordinary restore
+session. Other tabs retain their own dimensions; the startup geometry is not
+reapplied when switching back. `--geometry` still overrides `--cols`/`--rows`,
+and an unspecified or zero axis uses the initial local terminal size.
+
+The request is the xterm window operation `CSI 8 ; rows ; columns t`, in character
+cells. Lingon checks the resulting local size and warns if it still differs;
+the attachment stays usable and the remote size stays intact. Resizing is a
+request to the terminal emulator and window manager, so it cannot force an
+unsupported or restricted window to resize.
+
+| Terminal/layer | Resize support |
+| --- | --- |
+| [Xterm](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html) | Supports the sequence; enable it with `XTerm*allowWindowOps: true` when window operations are disabled. `disallowedWindowOps` can restrict individual operations. |
+| [XFCE Terminal](https://github.com/xfce-mirror/xfce4-terminal/blob/master/terminal/terminal-screen.c) | Handles VTE's resize request for the active terminal; ignores it when maximized or fullscreen. |
+| [iTerm2](https://iterm2.com/documentation-preferences-profiles-terminal.html) | Enable “A session may cause the window to resize” in the terminal profile. |
+| [Tmux](https://github.com/tmux/tmux/blob/master/input.c) | Consumes the ordinary resize sequence; use a direct terminal for window restoration. Split panes also constrain the available grid. |
+| Other terminals / window managers | Support varies. A reported `TERM=xterm-256color` alone does not establish window-resize support. Tiling, fullscreen and screen-size constraints may prevent an exact fit. |
 
 #### Create and rename sessions
 
@@ -348,6 +429,9 @@ Attach options (selection):
 - `-t, --token` share token for anonymous attach
 - `--access-token` access token for authenticated attach
 - `--request-control` request controller lease on connect
+- `-r, --restore` restore each selected session's window size; manual resizing updates that session
+- `-g, --geometry COLSxROWS` resize the local terminal and remote session; applied before `--restore`
+- `--cols`, `--rows` size individual dimensions (`0` uses local size); applied before `--restore`
 - `--pick` interactively pick a session
 - `--hostname-only` show hostname-only connect/disconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)

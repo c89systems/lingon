@@ -161,7 +161,7 @@ func TestPublisherSendSnapshotDoesNotSendActivityOnReplay(t *testing.T) {
 		Cols: 2, Rows: 1, Runes: []uint32{'A', 'B'}, Fg: []uint32{0, 0}, Bg: []uint32{0, 0},
 	}
 	p.mu.Unlock()
-	p.sendSnapshot()
+	p.sendReplay()
 }
 
 func TestPublisherConnectAndServeHonorsDialTimeout(t *testing.T) {

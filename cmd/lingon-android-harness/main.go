@@ -350,9 +350,22 @@ func startHarness(ctx context.Context, opts harnessOptions) (*harness, error) {
 				}
 			}
 			shellPath := strings.TrimSpace(r.URL.Query().Get("shell"))
+			requestedID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+			if requestedID != "" {
+				if normalized, err := headless.NormalizeSessionID(requestedID); err != nil || normalized != requestedID || count != 1 {
+					http.Error(w, "a valid session_id requires count=1", http.StatusBadRequest)
+					return
+				}
+			}
 			ids := make([]string, 0, count)
 			for i := 0; i < count; i++ {
-				id, err := h.startHost(h.access, cols, rows, shellPath, initialLines)
+				var id string
+				var err error
+				if requestedID == "" {
+					id, err = h.startHost(h.access, cols, rows, shellPath, initialLines)
+				} else {
+					id, err = h.startHostWithID(harnessHostOptions{ID: requestedID, Token: h.access, Cols: cols, Rows: rows, Shell: shellPath, InitialLines: initialLines})
+				}
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
@@ -703,22 +716,36 @@ func (h *harness) stop() {
 }
 
 func (h *harness) startHost(token string, cols int, rows int, shellPath string, initialLines int) (string, error) {
+	h.hostIndex++
+	return h.startHostWithID(harnessHostOptions{ID: fmt.Sprintf("host-%d", h.hostIndex), Token: token, Cols: cols, Rows: rows, Shell: shellPath, InitialLines: initialLines})
+}
+
+type harnessHostOptions struct {
+	ID, Token, Shell         string
+	Cols, Rows, InitialLines int
+}
+
+func (h *harness) startHostWithID(opts harnessHostOptions) (string, error) {
 	if h.ctx.Err() != nil {
 		return "", h.ctx.Err()
 	}
-	h.hostIndex++
-	id := fmt.Sprintf("host-%d", h.hostIndex)
-	scriptPath, err := writeHostScript(h.baseDir, id, h.selfPath, shellPath, initialLines)
-	if err != nil {
-		return "", err
-	}
-	cancel, err := startHostSession(h.ctx, h.endpoint, token, id, scriptPath, cols, rows, filepath.Join(h.configDir, "tls"))
-	if err != nil {
-		return "", err
-	}
 	h.sessionsMu.Lock()
+	defer h.sessionsMu.Unlock()
+	for _, existing := range h.sessions {
+		if existing.id == opts.ID {
+			return "", fmt.Errorf("host session %s already exists", opts.ID)
+		}
+	}
+	id := opts.ID
+	scriptPath, err := writeHostScript(h.baseDir, id, h.selfPath, opts.Shell, opts.InitialLines)
+	if err != nil {
+		return "", err
+	}
+	cancel, err := startHostSession(h.ctx, h.endpoint, opts.Token, id, scriptPath, opts.Cols, opts.Rows, filepath.Join(h.configDir, "tls"))
+	if err != nil {
+		return "", err
+	}
 	h.sessions = append(h.sessions, sessionHandle{id: id, stop: cancel})
-	h.sessionsMu.Unlock()
 	return id, nil
 }
 

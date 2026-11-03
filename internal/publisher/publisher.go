@@ -58,7 +58,7 @@ type Publisher struct {
 	// It may invoke reply asynchronously after delivery; Reset cancels pending work.
 	OnClipboard            func(context.Context, *protocolpb.Clipboard, func(*protocolpb.Clipboard))
 	OnClipboardReset       func()
-	OnResize               func(cols, rows int)
+	OnResize               func(*protocolpb.Resize)
 	OnCommand              func(kind protocolpb.CommandKind)
 	OnManagement           func(context.Context, *protocolpb.SessionManagement) *protocolpb.SessionManagement
 	management             chan *protocolpb.SessionManagement
@@ -627,8 +627,7 @@ func (p *Publisher) readWS(ctx context.Context, ws *websocket.Conn) error {
 			continue
 		}
 		if hello := frame.GetHello(); hello != nil {
-			p.sendScrollbackSnapshot()
-			p.sendSnapshot()
+			p.sendReplay()
 			p.sendWallInactivityStatus()
 			continue
 		}
@@ -641,7 +640,7 @@ func (p *Publisher) readWS(ctx context.Context, ws *websocket.Conn) error {
 			continue
 		}
 		if resize := frame.GetResize(); resize != nil && p.OnResize != nil {
-			p.OnResize(int(resize.Cols), int(resize.Rows))
+			p.OnResize(resize)
 			continue
 		}
 		if welcome := frame.GetWelcome(); welcome != nil {
@@ -717,24 +716,34 @@ func (p *Publisher) PublishScrollback(rows []terminal.ScrollbackRow, cols int, c
 	}
 }
 
-func (p *Publisher) sendScrollbackSnapshot() {
+// Keep replacement chunks and their terminating live snapshot contiguous even
+// when new PTY output is waiting in the ordinary output queue.
+func (p *Publisher) sendReplay() {
+	frames := p.scrollbackSnapshotFrames()
+	if frame := p.snapshotFrame(); frame != nil {
+		frames = append(frames, frame)
+	}
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	for _, frame := range frames {
+		if !p.sendFrameLocked(frame) {
+			return
+		}
+	}
+}
+
+func (p *Publisher) scrollbackSnapshotFrames() []*protocolpb.Frame {
 	if p.scrollbackSnapshot == nil {
-		return
+		return nil
 	}
 	rows := p.scrollbackSnapshot()
-	if len(rows) == 0 {
-		return
-	}
 	p.mu.Lock()
 	cols := p.opts.Cols
 	if p.lastSnap != nil {
 		cols = int(p.lastSnap.Cols)
 	}
 	p.mu.Unlock()
-	frames := relaywire.BuildScrollbackFrames(p.opts.SessionID, cols, rows, true)
-	for _, frame := range frames {
-		p.sendFrame(frame)
-	}
+	return relaywire.BuildScrollbackFrames(p.opts.SessionID, cols, rows, true)
 }
 
 func (p *Publisher) sendWallInactivityStatus() {
@@ -749,15 +758,19 @@ func (p *Publisher) sendWallInactivityStatus() {
 }
 
 func (p *Publisher) sendFrame(frame *protocolpb.Frame) bool {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	return p.sendFrameLocked(frame)
+}
+
+func (p *Publisher) sendFrameLocked(frame *protocolpb.Frame) bool {
 	p.mu.Lock()
 	ws := p.conn
 	p.mu.Unlock()
 	if ws == nil {
 		return false
 	}
-	p.writeMu.Lock()
 	err := relaywire.WriteFrame(context.Background(), ws, frame)
-	p.writeMu.Unlock()
 	if err != nil {
 		_ = ws.Close(websocket.StatusInternalError, "write error")
 		p.clearConn()
@@ -771,13 +784,13 @@ func (p *Publisher) sendActivity() {
 	_ = p.sendFrame(relaywire.ActivityFrame(p.opts.SessionID))
 }
 
-func (p *Publisher) sendSnapshot() {
+func (p *Publisher) snapshotFrame() *protocolpb.Frame {
 	p.mu.Lock()
 	snap := p.lastSnap
 	p.lastSent = snap
 	p.mu.Unlock()
 	if snap == nil {
-		return
+		return nil
 	}
 	frame := &protocolpb.Frame{
 		SessionId: p.opts.SessionID,
@@ -786,7 +799,7 @@ func (p *Publisher) sendSnapshot() {
 	if p.OnFrame != nil {
 		p.OnFrame(frame)
 	}
-	_ = p.sendFrame(frame)
+	return frame
 }
 
 // PublishWallInactivityStatus sends inactivity wall status to connected clients.
