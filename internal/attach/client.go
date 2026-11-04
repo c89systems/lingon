@@ -1514,6 +1514,10 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	col := cursor.Col
 	visible := cursor.Visible
 	suppressed := c.tabSuppress.Resolve(cursor.Row)
+	// Cached tab switches must respect a cursor already occupying row 1 too.
+	if cursor.Row <= 1 {
+		atomic.StoreUint32(&c.forceTabsVisible, 0)
+	}
 	forceTabsVisible := false
 	for {
 		n := atomic.LoadUint32(&c.forceTabsVisible)
