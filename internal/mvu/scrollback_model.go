@@ -9,6 +9,7 @@ type ScrollbackViewport struct {
 	col          int
 	history      ScrollbackPosition
 	historyKnown bool
+	copy         scrollbackCopy
 }
 
 // Enter enables scrollback view and resets offsets.
@@ -17,6 +18,7 @@ func (v *ScrollbackViewport) Enter() {
 		return
 	}
 	v.active = true
+	v.copy = scrollbackCopy{}
 	v.historyKnown = false
 	v.offset = 0
 	v.col = 0
@@ -29,6 +31,7 @@ func (v *ScrollbackViewport) EnterAt(totalRows, viewRows, rowOffset, contentCols
 		return
 	}
 	v.active = true
+	v.copy = scrollbackCopy{}
 	v.historyKnown = false
 	v.SetOffset(totalRows, viewRows, rowOffset)
 	v.SetColumn(contentCols, viewCols, colOffset)
@@ -40,6 +43,7 @@ func (v *ScrollbackViewport) Exit() {
 		return
 	}
 	v.active = false
+	v.copy = scrollbackCopy{}
 	v.historyKnown = false
 	v.offset = 0
 	v.col = 0
@@ -55,6 +59,7 @@ func (v *ScrollbackViewport) SetActive(active bool) {
 		return
 	}
 	v.active = false
+	v.copy = scrollbackCopy{}
 	v.historyKnown = false
 	v.offset = 0
 	v.col = 0
@@ -158,6 +163,9 @@ func (v *ScrollbackViewport) Page(totalRows, viewRows, delta, stepRows int) bool
 	if stepRows <= 0 {
 		stepRows = viewRows
 	}
+	if v.Visual() {
+		return v.moveCopyCursor(-delta * stepRows)
+	}
 	max := scrollbackMaxOffset(totalRows, viewRows)
 	prev := v.offset
 	next := v.offset + delta*stepRows
@@ -179,6 +187,9 @@ func (v *ScrollbackViewport) Top(totalRows, viewRows int) bool {
 	if v == nil {
 		return false
 	}
+	if v.Visual() {
+		return v.moveCopyCursor(v.copy.base - v.copy.cursor)
+	}
 	max := scrollbackMaxOffset(totalRows, viewRows)
 	if v.offset == max {
 		if v.col == 0 {
@@ -197,6 +208,9 @@ func (v *ScrollbackViewport) Bottom() bool {
 	if v == nil {
 		return false
 	}
+	if v.Visual() {
+		return v.moveCopyCursor(v.copy.base + max(0, v.copy.total-1) - v.copy.cursor)
+	}
 	if v.offset == 0 {
 		if v.col == 0 {
 			return false
@@ -212,6 +226,9 @@ func (v *ScrollbackViewport) Bottom() bool {
 // PanX adjusts horizontal pan and reports whether state changed.
 func (v *ScrollbackViewport) PanX(contentCols, viewCols, delta int) bool {
 	if v == nil || delta == 0 {
+		return false
+	}
+	if v.Visual() {
 		return false
 	}
 	max := scrollbackMaxColumn(contentCols, viewCols)

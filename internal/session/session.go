@@ -172,6 +172,8 @@ type Runner struct {
 	renderCache mvu.RenderCache
 	popups      mvu.Popups
 
+	textClipboard control.TextClipboard
+
 	sessionName string
 	sessionBase string
 
@@ -448,6 +450,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 	// Initialize the manager before local publishers can invoke OnSessions.
 	if r.opts.Publish && !r.opts.DisableRemoteSessions {
 		r.remoteSessions = newRemoteManager(remoteOptions{
+			TextClipboard:               &r.textClipboard,
 			Popup:                       r.popups.Frame,
 			Endpoint:                    r.opts.Endpoint,
 			Token:                       r.accessToken(),
@@ -735,6 +738,9 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 						return true
 					}
 					switch action {
+					case control.ActionPasteText:
+						r.pasteCopiedText(sigCtx)
+						return true
 					case control.ActionQuit:
 						if !activeLocal {
 							if r.remoteSessions != nil {
@@ -873,6 +879,8 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 							half = 1
 						}
 						switch cmd {
+						case scrollVisual, scrollSelect:
+							r.scrollbackCopy(cmd == scrollSelect, stdout, stdin)
 						case scrollPageUp:
 							r.scrollbackPage(1, half, stdout, stdin)
 						case scrollPageDown:
@@ -1042,7 +1050,7 @@ func (r *Runner) enterScrollback(sessionID string, stdout, stdin *os.File) {
 	r.scrollbackMu.Lock()
 	anchor := r.currentScrollbackAnchor(sessionID, stdout, stdin)
 	r.scrollbackView.EnterAt(anchor.totalRows, anchor.viewRows, anchor.rowOffset, anchor.contentCols, anchor.viewCols, anchor.colOffset)
-	r.scrollbackView.SyncHistory(anchor.history)
+	r.scrollbackView.SyncSource(mvu.ScrollbackSource{Position: anchor.history, HistoryRows: anchor.historyRows, LiveRows: anchor.liveRows, ViewRows: anchor.viewRows})
 	r.scrollbackSession = sessionID
 	r.scrollbackMu.Unlock()
 
@@ -1055,6 +1063,7 @@ func (r *Runner) enterScrollback(sessionID string, stdout, stdin *os.File) {
 
 type scrollbackAnchor struct {
 	totalRows, contentCols, viewCols, viewRows, rowOffset, colOffset int
+	historyRows, liveRows                                            int
 	history                                                          mvu.ScrollbackPosition
 }
 
@@ -1084,6 +1093,7 @@ func (r *Runner) currentScrollbackAnchor(sessionID string, stdout, stdin *os.Fil
 	history := local.scrollbackFrameState()
 	snap = history.live
 	anchor.history = mvu.ScrollbackPosition{End: history.end}
+	anchor.historyRows, anchor.liveRows = len(history.rows), int(snap.Rows)
 	anchor.totalRows = len(history.rows) + int(snap.Rows)
 	anchor.contentCols = scrollbackContentWidthTerminal(history.rows, snap)
 	if anchor.contentCols <= 0 {
@@ -1179,7 +1189,7 @@ func (r *Runner) scrollbackPage(delta int, stepRows int, stdout, stdin *os.File)
 	scrollback := history.rows
 	totalRows := len(scrollback) + int(snap.Rows)
 	contentCols := scrollbackContentWidthTerminal(scrollback, snap)
-	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
+	r.syncCopySourceLocked(history, rows)
 	r.scrollbackView.Normalize(totalRows, rows, contentCols, colsForViewport(stdout, stdin, snap))
 	changed := r.scrollbackView.Page(totalRows, rows, delta, stepRows)
 	r.scrollbackMu.Unlock()
@@ -1217,8 +1227,8 @@ func (r *Runner) scrollbackPanX(delta int, stdout, stdin *os.File) {
 	scrollback := history.rows
 	contentCols := scrollbackContentWidthTerminal(scrollback, snap)
 	totalRows := len(scrollback) + int(snap.Rows)
-	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
 	_, viewRows := r.focusedViewportSize(stdout, stdin)
+	r.syncCopySourceLocked(history, viewRows)
 	r.scrollbackView.Normalize(totalRows, viewRows, contentCols, cols)
 	changed := r.scrollbackView.PanX(contentCols, cols, delta)
 	r.scrollbackMu.Unlock()
@@ -1260,7 +1270,7 @@ func (r *Runner) scrollbackTop(viewRows int, stdout, stdin *os.File) {
 	scrollback := history.rows
 	totalRows := len(scrollback) + int(snap.Rows)
 	contentCols := scrollbackContentWidthTerminal(scrollback, snap)
-	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
+	r.syncCopySourceLocked(history, viewRows)
 	r.scrollbackView.Normalize(totalRows, viewRows, contentCols, colsForViewport(stdout, stdin, snap))
 	r.scrollbackView.Top(totalRows, viewRows)
 	r.scrollbackMu.Unlock()
@@ -1285,7 +1295,8 @@ func (r *Runner) scrollbackBottom(stdout, stdin *os.File) {
 	r.scrollbackMu.Lock()
 	history := local.scrollbackFrameState()
 	if r.scrollbackView.Active() && r.scrollbackSession == sessionID {
-		r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: history.end})
+		_, rows := r.focusedViewportSize(stdout, stdin)
+		r.syncCopySourceLocked(history, rows)
 		r.scrollbackView.Bottom()
 	}
 	r.scrollbackMu.Unlock()
@@ -1332,10 +1343,13 @@ func (r *Runner) renderScrollback(stdout, stdin *os.File) {
 	}
 	scrollback := history.rows
 	offset, colOffset := r.scrollbackView.OffsetFor(mvu.ScrollbackPosition{End: history.end}), r.scrollbackView.Column()
+	copyView := r.scrollbackView
+	copySource := mvu.ScrollbackSource{Position: mvu.ScrollbackPosition{End: history.end}, HistoryRows: len(scrollback), LiveRows: int(snap.Rows), ViewRows: rows}
 	percent := mvu.ScrollbackPercent(len(scrollback)+int(snap.Rows), rows, offset)
 	r.scrollbackMu.Unlock()
 	r.runtime().ApplyAction(mvu.ScrollbackPercentAction{Visible: true, Percent: percent})
 	viewSnap := mvu.BuildScrollbackViewFromTerminal(cols, rows, scrollback, snap, offset, colOffset)
+	viewSnap = copyView.DecorateCopy(viewSnap, copySource)
 	ctx := r.runCtx
 	if ctx == nil {
 		ctx = context.Background()
@@ -3432,7 +3446,7 @@ func (r *Runner) updateScrollbackSource(id string, stdout, stdin *os.File) {
 	if rows <= 0 {
 		rows = int(frame.live.Rows)
 	}
-	r.scrollbackView.SyncHistory(mvu.ScrollbackPosition{End: frame.end})
+	r.syncCopySourceLocked(frame, rows)
 	r.scrollbackView.Normalize(len(frame.rows)+int(frame.live.Rows), rows, scrollbackContentWidthTerminal(frame.rows, frame.live), cols)
 }
 

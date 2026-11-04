@@ -16,6 +16,7 @@ import (
 	"pkt.systems/lingon/internal/mvu"
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/ptytest"
+	term "pkt.systems/lingon/internal/terminal"
 )
 
 // The controlled peer deliberately separates history from live snapshots, and
@@ -26,6 +27,12 @@ func TestScrollbackHistoryAndLiveFramesStayAlignedPTY(t *testing.T) {
 		for _, delivery := range []string{"snapshot", "diff", "enter-pending"} {
 			t.Run(mode+"/"+delivery, func(t *testing.T) { testScrollbackFrameOrder(t, mode, delivery) })
 		}
+	}
+}
+
+func TestScrollbackVisualSurvivesIdenticalHistoryReplayPTY(t *testing.T) {
+	for _, mode := range []string{"attach", "multi"} {
+		t.Run(mode, func(t *testing.T) { testScrollbackFrameOrder(t, mode, "visual-replay") })
 	}
 }
 
@@ -145,6 +152,24 @@ func testScrollbackFrameOrder(t *testing.T, mode, delivery string) {
 		return strings.Contains(s.Row(0), "[100%]")
 	})
 	before := terminal.Screen()
+	if delivery == "visual-replay" {
+		terminal.Send("v j")
+		waitSearchScreen(t, terminal, func(s ptytest.Screen) bool {
+			return terminal.Cursor().Row == 7 && terminal.Snapshot().Cells[5*60].Mode&term.ModeInverse != 0
+		})
+		replay := proto.Clone(live).(*protocolpb.Snapshot)
+		replay.Title = "VISUAL-REPLAY"
+		send(&protocolpb.Frame{Payload: &protocolpb.Frame_Scrollback{Scrollback: &protocolpb.Scrollback{Cols: 60, Rows: history[:40], Clear: true}}})
+		send(&protocolpb.Frame{Payload: &protocolpb.Frame_Scrollback{Scrollback: &protocolpb.Scrollback{Cols: 60, Rows: history[40:]}}})
+		send(&protocolpb.Frame{Payload: &protocolpb.Frame_Snapshot{Snapshot: replay}})
+		waitTransportTitle(t, terminal, "VISUAL-REPLAY")
+		if terminal.Cursor().Row != 7 || terminal.Snapshot().Cells[5*60].Mode&term.ModeInverse == 0 {
+			t.Fatal("identical replacement cancelled the visual cursor or selection")
+		}
+		terminal.Send("k")
+		waitSearchScreen(t, terminal, func(s ptytest.Screen) bool { return terminal.Cursor().Row == 6 })
+		return
+	}
 	terminal.DrainRaw()
 	// Deliberately deliver multiple history-only messages before any new live
 	// frame. Each message must preserve every visible row and avoid repainting it.

@@ -28,7 +28,7 @@ func HelpLines(state State) []string {
 		"Ctrl+L q  quit attach (sessions keep running)",
 		"Ctrl+L C  send Enter ~. (disconnect SSH)",
 		"Ctrl+L d  send Ctrl+D",
-		"Ctrl+L [  scrollback (PgUp/PgDn/w/s/u/d half page; Up/Down or j/k line; J/K five lines; h/l one col; H/L five cols; Home/End/g/G top/bottom and reset x-pan; wheel scrolls)",
+		"Ctrl+L [  scrollback; Ctrl+L ] paste copied text (v visual lines; Space select/copy; PgUp/PgDn/w/s/u/d half page; Up/Down or j/k line; J/K five lines; h/l one col outside visual; H/L five cols; Home/End/g/G top/bottom; wheel scrolls; q leaves)",
 		"Ctrl+L r  toggle respawn",
 		"Ctrl+L 0  resize active headless to viewport",
 		"Ctrl+L !  toggle remote-size restore (attach only)",

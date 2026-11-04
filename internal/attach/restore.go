@@ -204,6 +204,11 @@ func (c *Client) processTerminalResize(ctx context.Context, allowNormal bool) er
 	} else if !acknowledged && !c.restoreEnabled() && allowNormal {
 		err = c.SendResize(ctx, cols, rows)
 	}
+	c.scrollbackMu.Lock()
+	if c.scrollbackView.Visual() {
+		c.syncScrollbackLocked()
+	}
+	c.scrollbackMu.Unlock()
 	c.RenderCurrentFull()
 	return err
 }

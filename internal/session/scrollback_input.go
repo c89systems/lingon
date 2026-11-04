@@ -21,6 +21,8 @@ const (
 	scrollBottom
 	scrollWheelUp
 	scrollWheelDown
+	scrollVisual
+	scrollSelect
 )
 
 type scrollInputState struct {
@@ -36,6 +38,10 @@ func (s *scrollInputState) reset() {
 func (s *scrollInputState) feed(b byte) scrollCommand {
 	if s.escState == 0 {
 		switch b {
+		case 'v':
+			return scrollVisual
+		case ' ':
+			return scrollSelect
 		case 'q', 'Q':
 			s.reset()
 			return scrollExit

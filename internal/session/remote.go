@@ -17,12 +17,14 @@ import (
 	"pkt.systems/lingon/internal/clipboard"
 	"pkt.systems/lingon/internal/clock"
 	"pkt.systems/lingon/internal/config"
+	"pkt.systems/lingon/internal/control"
 	"pkt.systems/lingon/internal/desktopnotify"
 	"pkt.systems/lingon/internal/logging"
 	"pkt.systems/lingon/internal/mvu"
 	"pkt.systems/lingon/internal/netgate"
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/retryafter"
+	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/theme"
 	"pkt.systems/lingon/internal/tlsmgr"
 	"pkt.systems/pslog"
@@ -70,6 +72,7 @@ type remoteView struct {
 }
 
 type remoteOptions struct {
+	TextClipboard               *control.TextClipboard
 	Popup                       func(string) *mvu.Popup
 	DisableDesktopNotifications bool
 	DesktopNotifier             desktopnotify.Notifier
@@ -95,6 +98,7 @@ type remoteOptions struct {
 }
 
 type remoteManager struct {
+	textClipboard               *control.TextClipboard
 	popup                       func(string) *mvu.Popup
 	endpoint                    string
 	endpointLabel               string
@@ -160,7 +164,12 @@ func newRemoteManager(opts remoteOptions) *remoteManager {
 		Endpoint: opts.Endpoint,
 		Theme:    theme.TUI(themeName),
 	}})
+	textClipboard := opts.TextClipboard
+	if textClipboard == nil {
+		textClipboard = &control.TextClipboard{}
+	}
 	return &remoteManager{
+		textClipboard:               textClipboard,
 		popup:                       opts.Popup,
 		endpoint:                    opts.Endpoint,
 		endpointLabel:               config.EndpointDisplay(opts.Endpoint, opts.HostnameOnly),
@@ -768,6 +777,7 @@ func (m *remoteManager) connectView(ctx context.Context, view *remoteView, stdou
 			tokenRefresher = m.refreshTokenErr
 		}
 		client = &attach.Client{
+			TextClipboard:               m.textClipboard,
 			Endpoint:                    m.endpoint,
 			SessionID:                   session.ID,
 			AccessToken:                 token,
@@ -957,6 +967,22 @@ func (m *remoteManager) SetScrollbackActive(sessionID string, active bool) {
 		client.RenderCurrent()
 	}
 	m.logViewState("scrollback_active", view, nil)
+}
+
+func (m *remoteManager) ScrollbackCopy(sessionID string, selectLines bool) {
+	_, client := m.viewClient(sessionID)
+	if client != nil {
+		client.ScrollbackCopy(selectLines)
+		client.RenderCurrent()
+	}
+}
+
+func (m *remoteManager) PasteText(ctx context.Context, sessionID, text string, stdout io.Writer) error {
+	_, client := m.viewClient(sessionID)
+	if client == nil || !client.HasSnapshot() {
+		return fmt.Errorf("session is not ready for text paste")
+	}
+	return m.SendInput(ctx, sessionID, terminal.TextPaste(text, client.Snapshot().GetMode()), stdout)
 }
 
 func (m *remoteManager) ScrollbackPage(sessionID string, delta int, viewRows int) {

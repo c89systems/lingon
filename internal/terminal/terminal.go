@@ -42,6 +42,7 @@ const (
 	SnapshotModeInsert
 	SnapshotModeAltScreen
 	SnapshotModeAppCursor
+	SnapshotModeBracketedPaste
 )
 
 // Cell mode flags used in snapshots.

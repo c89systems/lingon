@@ -150,6 +150,7 @@ type Client struct {
 	readErr                   error
 	controlCh                 chan struct{}
 	ws                        *websocket.Conn
+	compositorMu              sync.Mutex
 	compositor                *mvu.Runtime
 	effectsMu                 sync.RWMutex
 	runCtx                    context.Context
@@ -168,6 +169,8 @@ type Client struct {
 	themeName                 string
 
 	OnReady func()
+	// TextClipboard is shared by tabs in the owning interactive Lingon process.
+	TextClipboard *control.TextClipboard
 	// Popup provides an immutable UI-local popup layer for this tab.
 	Popup        func() *mvu.Popup
 	embedded     func() bool
@@ -535,6 +538,8 @@ func (c *Client) clock() clock.Clock {
 }
 
 func (c *Client) ensureCompositor() *mvu.Runtime {
+	c.compositorMu.Lock()
+	defer c.compositorMu.Unlock()
 	if c.compositor != nil {
 		return c.compositor
 	}
@@ -743,7 +748,9 @@ func (c *Client) SetStdout(w io.Writer) {
 func (c *Client) SetCompositor(ui *mvu.Runtime) {
 	c.renderMu.Lock()
 	defer c.renderMu.Unlock()
+	c.compositorMu.Lock()
 	c.compositor = ui
+	c.compositorMu.Unlock()
 	if ui == nil {
 		c.ensureCompositor()
 	}
@@ -926,9 +933,8 @@ func (c *Client) SuppressTabsUntilCursorLeavesTopRow() {
 	c.RenderCurrent()
 }
 
-// ForceTabsVisibleOnce forces the next active-view render passes to keep the tab
-// bar visible even if the cursor is currently on row 1.
-// A newly received terminal frame ends this temporary preview.
+// ForceTabsVisibleOnce requests a short tab preview for active-view renders.
+// Cursor auto-hide and newly received terminal frames take precedence.
 func (c *Client) ForceTabsVisibleOnce() {
 	atomic.StoreUint32(&c.forceTabsVisible, 2)
 }
@@ -1175,7 +1181,7 @@ func (c *Client) syncScrollbackLocked() {
 	if rows <= 0 {
 		rows = int(snap.Rows)
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.SyncSource(mvu.ScrollbackSource{Position: c.scrollbackBuffer.Position(), HistoryRows: c.scrollbackBuffer.Len(), LiveRows: int(snap.Rows), ViewRows: rows})
 	c.scrollbackView.Normalize(c.scrollbackBuffer.Len()+int(snap.Rows), rows, protoScrollbackContentWidth(c.scrollbackBuffer.Rows(), snap), cols)
 }
 
@@ -1240,7 +1246,7 @@ func (c *Client) setScrollbackActive(active bool) {
 	colOffset, liveOriginRow := render.ViewportOriginForSnapshot(snap, viewCols, viewRows)
 	rowOffset := max(0, int(snap.Rows)-viewRows-liveOriginRow) + c.scrollbackPending
 	c.scrollbackView.EnterAt(totalRows, viewRows, rowOffset, contentCols, viewCols, colOffset)
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.setScrollbackMouseActive(true)
 }
 
@@ -1263,7 +1269,7 @@ func (c *Client) scrollbackPage(delta int, stepRows int) bool {
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	return c.scrollbackView.Page(totalRows, viewRows, delta, stepRows)
 }
@@ -1279,7 +1285,7 @@ func (c *Client) scrollbackPanX(delta int) bool {
 	viewRows := c.scrollbackViewRows()
 	viewCols := c.scrollbackViewCols()
 	contentCols := protoScrollbackContentWidthLocked(c)
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	return c.scrollbackView.PanX(contentCols, viewCols, delta)
 }
@@ -1343,7 +1349,7 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.forceFreshHello = false
 	c.mu.Unlock()
 	if c.scrollbackReplacement != nil {
-		c.scrollbackBuffer.Apply(&protocolpb.Scrollback{Clear: true, Cols: snap.Cols, Rows: c.scrollbackReplacement.Rows()})
+		c.scrollbackBuffer.Replace(c.scrollbackReplacement)
 		c.scrollbackReplacement = nil
 	}
 	c.updateScrollbackSnapshotLocked()
@@ -1351,7 +1357,13 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.scrollbackMu.Unlock()
 	if !visible {
 		c.renderMu.Lock()
-		c.renderCache.Reset()
+		// Input can enter scrollback while this frame waits for a writer.
+		// Recheck under the render lock before discarding its stable baseline.
+		c.scrollbackMu.RLock()
+		if !c.scrollbackView.Visible() {
+			c.renderCache.Reset()
+		}
+		c.scrollbackMu.RUnlock()
 		c.renderMu.Unlock()
 	}
 	c.requestRenderCurrent()
@@ -1484,6 +1496,8 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 		scrollRows = c.scrollbackBuffer.Rows()
 	}
 	totalRows := len(scrollRows) + int(snap.Rows)
+	copyView := c.scrollbackView
+	copySource := mvu.ScrollbackSource{Position: c.scrollbackBuffer.Position(), HistoryRows: len(scrollRows), LiveRows: int(snap.Rows), ViewRows: rows}
 	scrollOffset := c.scrollbackView.OffsetFor(c.scrollbackBuffer.Position())
 	scrollCol := c.scrollbackView.Column()
 	scrollActive := c.scrollbackView.Active()
@@ -1493,6 +1507,7 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	viewSnap := snap
 	if scrollActive || scrollOffset > 0 {
 		viewSnap = mvu.BuildScrollbackViewFromProto(cols, rows, scrollRows, snap, scrollOffset, scrollCol)
+		viewSnap = copyView.DecorateCopy(viewSnap, copySource)
 	}
 	if c.embeddedView != nil && c.embeddedView(viewSnap) {
 		return
@@ -1705,7 +1720,7 @@ func (c *Client) ScrollbackTop(viewRows int) {
 	if viewRows <= 0 {
 		viewRows = c.scrollbackViewRows()
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	c.scrollbackView.Top(totalRows, viewRows)
 }
@@ -1719,7 +1734,7 @@ func (c *Client) ScrollbackBottom() {
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, c.scrollbackViewRows(), protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	c.scrollbackView.Bottom()
 }
@@ -2505,6 +2520,11 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return true
 				}
 				switch action {
+				case control.ActionPasteText:
+					if err := c.SendTextPaste(ctx, c.textClipboard().Text()); err != nil {
+						c.showInfoStatus("Paste: " + err.Error())
+					}
+					return true
 				case control.ActionQuit:
 					go func() {
 						_, err := c.Manage(ctx, sessionmanage.Request{RequestID: c.newClientID(), SessionID: c.SessionID, Kind: "close"})
@@ -2609,6 +2629,9 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					}
 					changed := false
 					switch cmd {
+					case scrollVisual, scrollSelect:
+						c.ScrollbackCopy(cmd == scrollSelect)
+						changed = true
 					case scrollPageUp:
 						changed = c.scrollbackPage(1, half)
 					case scrollPageDown:

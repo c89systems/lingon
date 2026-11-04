@@ -23,12 +23,13 @@ type Emulator struct {
 	cursorVisible bool
 	title         string
 
-	wrapPending bool
-	wrapMode    bool
-	originMode  bool
-	insertMode  bool
-	newLineMode bool
-	appCursor   bool
+	wrapPending    bool
+	wrapMode       bool
+	originMode     bool
+	insertMode     bool
+	newLineMode    bool
+	appCursor      bool
+	bracketedPaste bool
 
 	attr cellAttr
 
@@ -250,6 +251,7 @@ func (e *Emulator) LoadSnapshot(snap terminal.Snapshot) {
 	e.originMode = snap.Mode&terminal.SnapshotModeOrigin != 0
 	e.insertMode = snap.Mode&terminal.SnapshotModeInsert != 0
 	e.appCursor = snap.Mode&terminal.SnapshotModeAppCursor != 0
+	e.bracketedPaste = snap.Mode&terminal.SnapshotModeBracketedPaste != 0
 	e.newLineMode = false
 	e.tabStops = defaultTabs(cols)
 	e.resetAttributes()
@@ -278,6 +280,9 @@ func (e *Emulator) modeFlags() uint32 {
 	}
 	if e.appCursor {
 		flags |= terminal.SnapshotModeAppCursor
+	}
+	if e.bracketedPaste {
+		flags |= terminal.SnapshotModeBracketedPaste
 	}
 	return flags
 }
@@ -1277,6 +1282,8 @@ func (e *Emulator) setMode(params []int, private byte, enable bool) {
 				e.cursorPositionWithReason(1, 1, "DECOM")
 			case 1:
 				e.appCursor = enable
+			case 2004:
+				e.bracketedPaste = enable
 			case 47, 1047, 1049:
 				e.setAltScreen(enable, p == 1049)
 			}
@@ -1480,6 +1487,7 @@ func (e *Emulator) reset() {
 	e.originMode = false
 	e.insertMode = false
 	e.newLineMode = false
+	e.bracketedPaste = false
 	e.cursorVisible = true
 	e.wrapPending = false
 	e.title = ""

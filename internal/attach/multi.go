@@ -159,8 +159,9 @@ type sessionView struct {
 }
 
 type pendingOp struct {
-	input   []byte
-	command protocolpb.CommandKind
+	input     []byte
+	command   protocolpb.CommandKind
+	textPaste string
 }
 
 func selectRenderableView(views map[string]*sessionView, activeID string) (*sessionView, string) {
@@ -325,6 +326,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 	var createdSessionID string
 	managementBusy := false
 	var popups mvu.Popups
+	textClipboard := &control.TextClipboard{}
 	popupChanged := make(chan struct{}, 1)
 	closePopups := make(map[string]bool)
 	popupPending := make(map[string][]pendingOp)
@@ -893,6 +895,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			DesktopNotifier:             m.DesktopNotifier,
 		}
 		client.Popup = func() *mvu.Popup { return popups.Frame(session.ID) }
+		client.TextClipboard = textClipboard
 		client.embedded = func() bool { return popups.Parent(session.ID) != "" }
 		client.TermSize = func() (int, int) {
 			cols, rows := termSize()
@@ -996,6 +999,12 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			}
 			for {
 				for _, op := range pending {
+					if op.textPaste != "" {
+						if err := client.SendTextPaste(cctx, op.textPaste); err != nil && m.Logger != nil {
+							m.Logger.Debug("attach.text.paste.failed", "err", err, "session", session.ID)
+						}
+						continue
+					}
 					if len(op.input) > 0 {
 						if err := client.SendTerminalInput(cctx, op.input); err != nil {
 							if m.Logger != nil {
@@ -2406,6 +2415,34 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					return true
 				}
 				switch action {
+				case control.ActionPasteText:
+					text := textClipboard.Text()
+					if text == "" {
+						return true
+					}
+					mu.Lock()
+					targetID := popups.Focus(activeID)
+					target := views[targetID]
+					if target == nil && popups.Parent(targetID) != "" {
+						popupPending[targetID] = append(popupPending[targetID], pendingOp{textPaste: text})
+						mu.Unlock()
+						return true
+					}
+					if target == nil || target.client == nil {
+						mu.Unlock()
+						return true
+					}
+					if !target.connected || target.flushingInput {
+						target.pendingOps = append(target.pendingOps, pendingOp{textPaste: text})
+						mu.Unlock()
+						return true
+					}
+					targetClient := target.client
+					mu.Unlock()
+					if err := targetClient.SendTextPaste(ctx, text); err != nil {
+						showError("Paste: "+err.Error(), 3*time.Second)
+					}
+					return true
 				case control.ActionQuit:
 					mu.Lock()
 					focused := popups.Focus(activeID)
@@ -2658,9 +2695,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			pending = append(pending, out...)
 			return true
 		}
-		filtered := make([]byte, 0, len(data))
-		allHandledByScrollback := true
-		for _, b := range data {
+		processScrollbackByte := func(b byte) bool {
 			client := focusedClient()
 			if client != nil && client.ScrollbackActive() {
 				cmd := scrollState.feed(b)
@@ -2668,7 +2703,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					client.SetScrollbackActive(false)
 					mouseMode.Set(false)
 					client.RenderCurrent()
-					continue
+					return true
 				}
 				if cmd != scrollNone {
 					_, rows := client.terminalSize()
@@ -2681,6 +2716,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					}
 					changed := false
 					switch cmd {
+					case scrollVisual, scrollSelect:
+						client.ScrollbackCopy(cmd == scrollSelect)
+						changed = true
 					case scrollPageUp:
 						changed = client.ScrollbackPage(1, half)
 					case scrollPageDown:
@@ -2716,6 +2754,14 @@ func (m *MultiClient) Run(ctx context.Context) error {
 						client.RenderCurrent()
 					}
 				}
+				return true
+			}
+			return false
+		}
+		filtered := make([]byte, 0, len(data))
+		allHandledByScrollback := true
+		for _, b := range data {
+			if processScrollbackByte(b) {
 				continue
 			}
 			allHandledByScrollback = false
@@ -2741,6 +2787,10 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		filtered = terminal.TranslateAppCursorKeys(filtered, client != nil && client.appCursorActive())
 		for _, fb := range filtered {
+			// A prefix earlier in this same read may have entered scrollback.
+			if processScrollbackByte(fb) {
+				continue
+			}
 			if !processNormalByte(fb) {
 				return nil
 			}

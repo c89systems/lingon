@@ -53,6 +53,8 @@ const (
 	ActionClosePopup
 	// ActionSSHDisconnect sends Enter followed by the SSH disconnect escape.
 	ActionSSHDisconnect
+	// ActionPasteText pastes the process-local scrollback text clipboard.
+	ActionPasteText
 )
 
 // Prefix tracks ctrl+l command state.
@@ -111,6 +113,8 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionNextTheme, nil
 		case '[':
 			return ActionScrollback, nil
+		case ']':
+			return ActionPasteText, nil
 		case '/':
 			return ActionSearch, nil
 		case '!':
