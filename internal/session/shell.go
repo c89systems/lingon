@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"strings"
 
 	"pkt.systems/lingon/internal/clipboard"
 	"pkt.systems/lingon/internal/pty"
+	"pkt.systems/lingon/internal/terminal"
 )
 
 func resolveShellPath(shellOverride string) string {
@@ -28,17 +30,29 @@ func resolveShellPath(shellOverride string) string {
 	return path
 }
 
-func startShell(shellOverride, term string, endpoint *clipboard.Endpoint) (*os.File, *os.File, *exec.Cmd, error) {
-	path := resolveShellPath(shellOverride)
+type shellStart struct {
+	shell, term string
+	size        terminal.WindowSize
+	clipboard   *clipboard.Endpoint
+}
+
+func startShell(in shellStart) (*os.File, *os.File, *exec.Cmd, error) {
+	path := resolveShellPath(in.shell)
 	cmd := exec.Command(path)
-	cmd.Env = os.Environ()
-	if term != "" {
-		cmd.Env = append(cmd.Env, "TERM="+term)
+	// These variables describe the enclosing terminal, not this new PTY. Leaving
+	// them exported makes programs override TIOCGWINSZ with stale parent sizes.
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "LINES=") && !strings.HasPrefix(entry, "COLUMNS=") {
+			cmd.Env = append(cmd.Env, entry)
+		}
 	}
-	if endpoint != nil {
-		cmd.Env = endpoint.Env(cmd.Env)
+	if in.term != "" {
+		cmd.Env = append(cmd.Env, "TERM="+in.term)
 	}
-	ptyFile, ttyFile, err := pty.StartWithTTY(cmd)
+	if in.clipboard != nil {
+		cmd.Env = in.clipboard.Env(cmd.Env)
+	}
+	ptyFile, ttyFile, err := pty.StartWithTTY(cmd, in.size)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("start shell: %w", err)
 	}

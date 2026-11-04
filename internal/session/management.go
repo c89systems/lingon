@@ -62,6 +62,9 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 			}
 		}
 		cols, rows := local.Size()
+		if req.Cols > 0 && req.Rows > 0 {
+			cols, rows = req.Cols, req.Rows
+		}
 		args := []string{"-x", "--config-dir", cfg, "--session", id, "--cols", strconv.Itoa(cols), "--rows", strconv.Itoa(rows), "--term", r.opts.Term, "--respawn=" + strconv.FormatBool(r.opts.Respawn), "--scrollback-lines", strconv.Itoa(r.opts.ScrollbackLines)}
 		if r.opts.ConfigFile != "" {
 			args = append(args, "--config", r.opts.ConfigFile)

@@ -1242,7 +1242,17 @@ func (s *localSession) runOnce(ctx context.Context) error {
 		s.clipboardMu.Unlock()
 		_ = endpoint.Close()
 	}()
-	ptyFile, ttyFile, cmd, err := startShell(s.shell, s.term, endpoint)
+	cols, rows := s.Size()
+	if cols <= 0 {
+		cols = 80
+	}
+	if rows <= 0 {
+		rows = 24
+	}
+	ptyFile, ttyFile, cmd, err := startShell(shellStart{
+		shell: s.shell, term: s.term, clipboard: endpoint,
+		size: terminal.WindowSize{Cols: cols, Rows: rows},
+	})
 	if err != nil {
 		s.reportStartup(err)
 		return err
@@ -1340,7 +1350,7 @@ func (s *localSession) runOnce(ctx context.Context) error {
 		}
 		emuImpl.SetScrollbackLimit(s.scrollbackLines)
 	}
-	cols, rows := s.cols, s.rows
+	cols, rows = s.cols, s.rows
 	_ = s.resizePTY(cols, rows)
 	rawSnap, snapErr := s.emulator.Snapshot()
 	if snapErr == nil {

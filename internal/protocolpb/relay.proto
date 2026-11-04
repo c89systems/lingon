@@ -204,4 +204,6 @@ message SessionManagement {
   string result_session_id = 5;
   string error = 6;
   bool completed = 7;
+  uint32 cols = 8;
+  uint32 rows = 9;
 }

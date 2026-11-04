@@ -754,8 +754,8 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 					case control.ActionPopup:
 						parent, _ := r.activeSession()
 						if !r.popups.Toggle(parent) {
-							cols, rows := r.terminalGeometry()
-							if cols <= 0 || mvu.PopupRows(rows) == 0 {
+							cols, rows := r.popupGeometry()
+							if cols <= 0 || rows == 0 {
 								r.showErrorStatus("Terminal too small for popup", stdout, 3*time.Second)
 								return true
 							}
@@ -766,7 +766,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 								r.showErrorStatus(err.Error(), stdout, 5*time.Second)
 							}
 						}
-						r.resizePopup(r.terminalGeometry())
+						r.resizePopup()
 						r.updateTabs(r.combinedSessions())
 						r.forceRedraw(stdout)
 					case control.ActionClosePopup:
@@ -2023,7 +2023,7 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 	cols, rows := r.terminalGeometry()
 	cursorQuery := r.cursorQueryFunc(stdout, stdin)
 	if r.popups.Parent(id) != "" {
-		rows = mvu.PopupRows(rows)
+		cols, rows = r.popupGeometry()
 		// Terminal replies use popup-local coordinates, never the composed cursor.
 		cursorQuery = func(s terminal.Snapshot) (int, int, bool) { return s.Cursor.Y + 1, s.Cursor.X + 1, true }
 	}
@@ -2164,7 +2164,7 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 		pub.OnClipboard = session.handleClipboard
 		pub.OnClipboardReset = session.clipboardHandler.Reset
 		pub.OnManagement = func(ctx context.Context, request *protocolpb.SessionManagement) *protocolpb.SessionManagement {
-			result := r.Manage(ctx, sessionmanage.Request{RequestID: request.RequestId, SessionID: session.ID(), Kind: request.Kind, Name: request.Name})
+			result := r.Manage(ctx, sessionmanage.Request{RequestID: request.RequestId, SessionID: session.ID(), Kind: request.Kind, Name: request.Name, Cols: int(request.Cols), Rows: int(request.Rows)})
 			return &protocolpb.SessionManagement{ResultSessionId: result.SessionID, Name: result.Name, Error: result.Error}
 		}
 		pub.OnCommand = func(kind protocolpb.CommandKind) {
@@ -3310,7 +3310,7 @@ func (r *Runner) activateLocalSession(sessionID string, stdout, stdin *os.File) 
 		r.remoteSessions.Hide(activeID)
 	}
 	r.setActiveSession(sessionID, true)
-	r.resizePopup(r.terminalGeometry())
+	r.resizePopup()
 	if request := r.windowRequest(sessionID); request != nil {
 		if size := request.Pending(); size.Cols > 0 && size.Rows > 0 {
 			r.setTerminalGeometry(size.Cols, size.Rows)
@@ -3387,6 +3387,9 @@ func (r *Runner) takeControlLocal(local *localSession) {
 	}
 	local.takeControl()
 	cols, rows := r.terminalGeometry()
+	if r.popups.Parent(local.ID()) != "" {
+		cols, rows = r.popupGeometry()
+	}
 	if currentCols, currentRows := local.Size(); currentCols != cols || currentRows != rows {
 		r.resizeLocalSession(local, cols, rows)
 	}

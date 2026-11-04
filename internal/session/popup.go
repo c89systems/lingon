@@ -2,8 +2,19 @@ package session
 
 import (
 	"os"
+
 	"pkt.systems/lingon/internal/mvu"
 )
+
+// popupGeometry uses the same physical viewport as the framebuffer. The parent
+// may have a larger logical grid while a window-size request is unacknowledged.
+func (r *Runner) popupGeometry() (int, int) {
+	cols, rows := termSizeAny(r.stdout(), r.stdin())
+	if cols <= 0 || rows <= 0 {
+		cols, rows = r.terminalGeometry()
+	}
+	return cols, mvu.PopupRows(rows)
+}
 
 func (r *Runner) focusedViewportSize(stdout, stdin *os.File) (int, int) {
 	cols, rows := termSizeAny(stdout, stdin)
@@ -22,11 +33,11 @@ func (r *Runner) focusedSession() (string, bool) {
 	return id, local
 }
 
-func (r *Runner) resizePopup(cols, rows int) {
+func (r *Runner) resizePopup() {
 	parent, _ := r.activeSession()
 	id := r.popups.ID(parent)
 	if local := r.localSession(id); local != nil {
-		height := mvu.PopupRows(rows)
+		cols, height := r.popupGeometry()
 		if height > 0 {
 			currentCols, currentRows := local.Size()
 			if currentCols != cols || currentRows != height {

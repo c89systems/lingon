@@ -2422,13 +2422,13 @@ func (m *MultiClient) Run(ctx context.Context) error {
 						renderActiveCurrent()
 						return true
 					}
-					_, rows := termSize()
+					cols, rows := termSize()
 					if mvu.PopupRows(rows) == 0 {
 						showError("Terminal too small for popup", 3*time.Second)
 						return true
 					}
 					if parentView != nil && parentView.client != nil && !busy {
-						req := sessionmanage.Request{RequestID: parentView.client.newClientID(), SessionID: parent, Kind: "create"}
+						req := sessionmanage.Request{RequestID: parentView.client.newClientID(), SessionID: parent, Kind: "create", Cols: cols, Rows: mvu.PopupRows(rows)}
 						id := sessionmanage.CreatedSessionID(req)
 						popups.Add(parent, mvu.Popup{SessionID: id, Name: id})
 						manageSession(parentView.client, req)

@@ -76,7 +76,7 @@ func (h *Hub) manage(ctx context.Context, req sessionmanage.Request) (sessionman
 	h.management[key] = waiter
 	h.mu.Unlock()
 	defer func() { h.mu.Lock(); delete(h.management, key); h.mu.Unlock() }()
-	frame := &protocolpb.Frame{SessionId: req.SessionID, Payload: &protocolpb.Frame_Management{Management: &protocolpb.SessionManagement{CorrelationId: key, RequestId: req.RequestID, Kind: req.Kind, Name: req.Name}}}
+	frame := &protocolpb.Frame{SessionId: req.SessionID, Payload: &protocolpb.Frame_Management{Management: &protocolpb.SessionManagement{CorrelationId: key, RequestId: req.RequestID, Kind: req.Kind, Name: req.Name, Cols: uint32(req.Cols), Rows: uint32(req.Rows)}}}
 	if err := host.Send(ctx, frame); err != nil {
 		return sessionmanage.Result{}, err
 	}

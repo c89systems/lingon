@@ -101,6 +101,11 @@ func popupCreationIntent(t *testing.T, closePopup bool) {
 	}); err != nil {
 		t.Fatalf("queued explicit popup close was lost: %v", err)
 	}
+	// The server's close frame precedes the client's processing of that frame.
+	// Fence the visible focus handoff before typing into the parent.
+	popupScreen(t, viewer, func(s ptytest.Screen) bool {
+		return !s.Contains("j hide") && strings.HasPrefix(s.Row(s.Rows-1), "/ ")
+	})
 	viewer.Send("\x1bprintf 'PARENT_%s\\n' SURVIVES\r")
 	popupScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("PARENT_SURVIVES") && !s.Contains("j hide") })
 }

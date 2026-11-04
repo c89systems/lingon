@@ -16,6 +16,9 @@ type Request struct {
 	SessionID string `json:"session_id"`
 	Kind      string `json:"kind"`
 	Name      string `json:"name,omitempty"`
+	// Cols and Rows optionally size a created session before its program starts.
+	Cols int `json:"cols,omitempty"`
+	Rows int `json:"rows,omitempty"`
 }
 
 // Result acknowledges readiness or a committed display-name change.
@@ -38,6 +41,12 @@ func Validate(req Request) error {
 	}
 	if req.Kind != "create" && req.Kind != "rename" && req.Kind != "close" {
 		return fmt.Errorf("unknown session operation")
+	}
+	if req.Cols < 0 || req.Rows < 0 || req.Cols > 65535 || req.Rows > 65535 || (req.Cols == 0) != (req.Rows == 0) {
+		return fmt.Errorf("creation geometry requires both columns and rows between 1 and 65535")
+	}
+	if req.Kind != "create" && (req.Cols != 0 || req.Rows != 0) {
+		return fmt.Errorf("only creation accepts terminal geometry")
 	}
 	if req.Kind == "rename" {
 		return ValidateName(req.Name)

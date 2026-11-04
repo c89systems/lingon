@@ -42,6 +42,13 @@ ordinary sessions. Hiding keeps the terminal running. If its parent closes, the
 popup survives and becomes a normal tab. `Ctrl+l J` explicitly terminates the
 popup, even while hidden.
 
+Popup programs start with the content box's width and height, excluding the bar.
+Creation can supply initial columns and rows; without them, a new session inherits
+the source session's geometry. The PTY is sized before the program starts, and
+enclosing-terminal `LINES`/`COLUMNS` exports are removed so programs query their
+own terminal. Taking control or typing into a popup keeps its bounded geometry.
+The parent retains normal window-resize behavior.
+
 `Ctrl+l Q` force-closes the focused terminal, including a shown popup, without
 depending on terminal input or EOF handling. Owner-authorized remote close uses
 the management transport; its acknowledgement is written before the host closes

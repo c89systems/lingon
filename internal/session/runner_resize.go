@@ -111,7 +111,7 @@ func (r *Runner) ResizeActive(cols, rows int) {
 		return
 	}
 	r.setTerminalGeometry(cols, rows)
-	r.resizePopup(cols, rows)
+	r.resizePopup()
 	activeID, activeLocal := r.activeSession()
 	if activeLocal {
 		targetID := strings.TrimSpace(activeID)
