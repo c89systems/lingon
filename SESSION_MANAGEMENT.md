@@ -39,7 +39,7 @@ The covered area, including its themed name/hint bar, is at most 24 rows or half
 the viewport, whichever is smaller. Each tab keeps its own popup. The originating
 UI omits its popup sessions from tab navigation and search; other viewers see
 ordinary sessions. Hiding keeps the terminal running. If its parent closes, the
-popup survives and becomes a normal tab. `Ctrl+l J` explicitly terminates the
+popup survives and becomes a normal tab. `Ctrl+l J` forcefully terminates the
 popup, even while hidden.
 
 Popup programs start with the content box's width and height, excluding the bar.
@@ -53,6 +53,9 @@ The parent retains normal window-resize behavior.
 depending on terminal input or EOF handling. Owner-authorized remote close uses
 the management transport; its acknowledgement is written before the host closes
 the session transport. `Ctrl+l q` quits attach without closing any terminals.
+Remote force-termination requires an updated running host and, when using a
+relay, an updated relay. Older runtimes reject the operation with
+`unknown session operation`; updating only the attach client is insufficient.
 Raw Ctrl+D leaves attach from an ordinary tab. In a focused popup it passes
 through as normal terminal input, allowing shell logout to close the popup.
 Once focus returns to the parent, the next Ctrl+D detaches attach. Hidden popups

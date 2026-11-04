@@ -63,6 +63,9 @@ func TestPopupTerminalLocalAndRelayCLI(t *testing.T) {
 				return strings.Contains(s.Row(10), "j hide") && strings.Contains(strings.Join(s.Lines[11:], "\n"), "PROMPT>")
 			})
 			child := strings.Fields(viewer.Screen().Row(10))[0]
+			if !strings.Contains(viewer.Screen().Row(10), "J terminate") {
+				t.Fatalf("popup termination hint missing: %q", viewer.Screen().Row(10))
+			}
 			if strings.Contains(viewer.Screen().Row(0), child) {
 				t.Fatal("origin's popup appeared as a normal tab")
 			}

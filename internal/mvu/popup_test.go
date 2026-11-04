@@ -45,7 +45,7 @@ func TestPopupGeometryCompositionAndTheme(t *testing.T) {
 				continue
 			}
 			bar := rows - height - 1
-			if got := string(runesFromProto(frame.Runes[bar*cols : (bar+1)*cols])); !strings.Contains(got, "tools  Ctrl+L: j hide · J close · h help") {
+			if got := string(runesFromProto(frame.Runes[bar*cols : (bar+1)*cols])); !strings.Contains(got, "tools  Ctrl+L: j hide · J terminate · h help") {
 				t.Fatalf("rows=%d bar=%q", rows, got)
 			}
 			if frame.Runes[(bar+1)*cols] != 'P' || (bar > 0 && frame.Runes[(bar-1)*cols] != 'B') {

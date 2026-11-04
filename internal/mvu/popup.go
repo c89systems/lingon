@@ -139,7 +139,7 @@ func popupLabel(name string) string {
 		}
 		return r
 	}, name)
-	return name + "  Ctrl+L: j hide · J close · h help"
+	return name + "  Ctrl+L: j hide · J terminate · h help"
 }
 
 func composePopup(base *protocolpb.Snapshot, cols, rows int, state State) (*protocolpb.Snapshot, error) {

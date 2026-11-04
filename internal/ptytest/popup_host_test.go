@@ -20,6 +20,9 @@ func TestHostPopupHidesReusesAndPromotesPTY(t *testing.T) {
 	waitSearchScreen(t, host, func(s ptytest.Screen) bool {
 		return strings.Contains(s.Row(10), "popup-parent-2") && strings.Contains(s.Row(10), "j hide") && strings.Contains(strings.Join(s.Lines[11:], "\n"), "READY>")
 	})
+	if !strings.Contains(host.Screen().Row(10), "J terminate") {
+		t.Fatalf("popup termination hint missing: %q", host.Screen().Row(10))
+	}
 	if strings.Contains(host.Screen().Row(0), "popup-parent-2") {
 		t.Fatal("popup leaked into tab bar")
 	}
