@@ -928,6 +928,7 @@ func (c *Client) SuppressTabsUntilCursorLeavesTopRow() {
 
 // ForceTabsVisibleOnce forces the next active-view render passes to keep the tab
 // bar visible even if the cursor is currently on row 1.
+// A newly received terminal frame ends this temporary preview.
 func (c *Client) ForceTabsVisibleOnce() {
 	atomic.StoreUint32(&c.forceTabsVisible, 2)
 }
@@ -1331,6 +1332,9 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.scrollbackMu.Lock()
 	c.mu.Lock()
 	c.lastSnapshot = snap
+	// A new terminal frame supersedes the cached-view tab-switch preview.
+	// Its cursor must drive auto-hide even if a preview render is still pending.
+	atomic.StoreUint32(&c.forceTabsVisible, 0)
 	if seq != 0 {
 		c.lastSeq = seq
 	}
@@ -1451,6 +1455,7 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 	snap.CursorVisible = diff.CursorVisible
 	snap.Mode = diff.Mode
 	snap.Title = diff.Title
+	atomic.StoreUint32(&c.forceTabsVisible, 0)
 	return snap
 }
 
