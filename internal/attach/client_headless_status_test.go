@@ -58,7 +58,7 @@ func TestHandleRoutedHeadlessStatus(t *testing.T) {
 		t.Fatalf("expected connected status wall to be handled")
 	}
 	state = client.ensureCompositor().State()
-	if !strings.Contains(state.ConnectionMessage, "connected to") {
+	if state.ConnectionMessage != "connected" {
 		t.Fatalf("expected connected banner, got %q", state.ConnectionMessage)
 	}
 	if state.ConnectionStyle != mvu.BannerGreen {

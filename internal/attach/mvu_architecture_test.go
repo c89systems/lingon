@@ -169,8 +169,8 @@ func TestAttachRenderingDoesNotUseOverlayOnlyComposePaths(t *testing.T) {
 	if !strings.Contains(multiSrc, "mvu.NewEffectScheduler(") {
 		t.Fatalf("expected attach multi timer effects to use mvu.NewEffectScheduler")
 	}
-	if !strings.Contains(multiSrc, "mvu.ConnectedToMessage(") {
-		t.Fatalf("expected attach multi connection status formatting to delegate to mvu.ConnectedToMessage")
+	if !strings.Contains(multiSrc, "mvu.ConnectedMessage") {
+		t.Fatalf("expected attach multi connection status to use mvu.ConnectedMessage")
 	}
 }
 

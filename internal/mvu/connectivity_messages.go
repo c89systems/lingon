@@ -7,14 +7,8 @@ import (
 	"time"
 )
 
-// ConnectedToMessage formats a connected status banner message.
-func ConnectedToMessage(endpoint string) string {
-	label := strings.TrimSpace(endpoint)
-	if label == "" {
-		return "connected"
-	}
-	return fmt.Sprintf("connected to %s", label)
-}
+// ConnectedMessage is the successful connection status shown by host and attach.
+const ConnectedMessage = "connected"
 
 // ConnectionLostMessage formats a persistent reconnect status banner message.
 func ConnectionLostMessage(endpoint string) string {

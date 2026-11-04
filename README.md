@@ -258,7 +258,7 @@ Interactive host options (selection):
 - `--term` TERM value for the PTY
 - `-r, --respawn` respawn the shell on exit
 - `-o, --offline` start offline; toggle relay publishing with `Ctrl+l o`
-- `--hostname-only` show hostname-only connect/disconnect banners
+- `--hostname-only` show hostname-only reconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)
 - `--disable-desktop-notifications` disable best-effort local desktop notifications for inactivity walls
 - `-k, --insecure` skip TLS verification
@@ -433,7 +433,7 @@ Attach options (selection):
 - `-g, --geometry COLSxROWS` resize the local terminal and remote session; applied before `--restore`
 - `--cols`, `--rows` size individual dimensions (`0` uses local size); applied before `--restore`
 - `--pick` interactively pick a session
-- `--hostname-only` show hostname-only connect/disconnect banners
+- `--hostname-only` show hostname-only reconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)
 - `--disable-desktop-notifications` disable best-effort local desktop notifications for inactivity walls
 - `-k, --insecure` skip TLS verification

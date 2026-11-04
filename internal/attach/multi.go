@@ -662,6 +662,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		switch wall.GetSender() {
 		case headless.RoutedStatusSenderConnected:
 			input.Kind = mvu.StatusConnected
+			input.Message = mvu.ConnectedMessage
 			timeout := wallTimeout(wall)
 			if timeout <= 0 {
 				timeout = 3 * time.Second
@@ -1054,7 +1055,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				return
 			}
 			if showStatus && !localSessionMode {
-				showConnected(mvu.ConnectedToMessage(endpointLabel), 3*time.Second)
+				showConnected(mvu.ConnectedMessage, 3*time.Second)
 			}
 			// Readiness can finish after the user activates another tab. Clear
 			// only this live active view's loading state, under the same lock as

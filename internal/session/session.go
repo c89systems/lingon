@@ -2094,7 +2094,7 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 				}
 				if connected {
 					status.Kind = PublishStatusConnected
-					status.Message = mvu.ConnectedToMessage(endpointLabel)
+					status.Message = mvu.ConnectedMessage
 				} else {
 					status.Kind = PublishStatusConnectionLost
 					status.Message = mvu.ConnectionLostMessage(endpointLabel)
@@ -2111,7 +2111,7 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 				return
 			}
 			if connected {
-				r.showStatus(mvu.ConnectedToMessage(endpointLabel), stdout, 3*time.Second)
+				r.showStatus(mvu.ConnectedMessage, stdout, 3*time.Second)
 				return
 			}
 			msg := mvu.ConnectionLostMessage(endpointLabel)

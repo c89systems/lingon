@@ -2064,6 +2064,7 @@ func (c *Client) handleRoutedHeadlessStatus(wall *protocolpb.Wall) bool {
 	switch wall.GetSender() {
 	case headless.RoutedStatusSenderConnected:
 		input.Kind = mvu.StatusConnected
+		input.Message = mvu.ConnectedMessage
 		timeout := wallTimeout(wall)
 		if timeout <= 0 {
 			timeout = 3 * time.Second

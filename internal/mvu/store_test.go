@@ -152,7 +152,7 @@ func TestRuntimeStatusFormattingAndExpiry(t *testing.T) {
 	if !connected.Changed {
 		t.Fatalf("expected connected status changed")
 	}
-	if !strings.Contains(connected.State.ConnectionMessage, "connected to https://relay.example/v1") {
+	if connected.State.ConnectionMessage != "connected" {
 		t.Fatalf("unexpected connected message: %q", connected.State.ConnectionMessage)
 	}
 	if connected.State.ConnectionStyle != BannerGreen {

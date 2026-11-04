@@ -272,7 +272,7 @@ func NewRootCommand(loader *lingon.Loader) *cobra.Command {
 	flags.StringVar(&termName, "term", lingon.DefaultTerminalTermValue(), "TERM for the PTY session")
 	flags.BoolVarP(&respawn, "respawn", "r", lingon.DefaultTerminalRespawn, "respawn shell on exit (host sessions only)")
 	flags.BoolVarP(&offline, "offline", "o", false, "start host sessions offline (no relay publish/connect until Ctrl+L o)")
-	flags.BoolVar(&hostnameOnly, "hostname-only", lingon.DefaultTerminalHostnameOnly, "show only hostname in connect/disconnect banners")
+	flags.BoolVar(&hostnameOnly, "hostname-only", lingon.DefaultTerminalHostnameOnly, "show only hostname in reconnect banners")
 	flags.BoolVar(&disableDesktopNotifications, "disable-desktop-notifications", lingon.DefaultTerminalDisableDesktopNotifications, "disable best-effort desktop notifications for inactivity walls")
 	flags.StringVar(&themeName, "theme", lingon.DefaultTerminalTheme, "theme for TUI chrome (use `lingon themes` to list)")
 	flags.StringVar(&logFile, "log-file", "", "path to client log file (disabled if empty)")

@@ -277,7 +277,7 @@ func NewAttachCommand(loader *lingon.Loader) *cobra.Command {
 	flags.BoolVar(&pick, "pick", false, "interactively pick a session")
 	flags.StringVar(&authFile, "auth-file", lingon.DefaultAuthPath(), "path to auth file")
 	flags.StringVar(&logFile, "log-file", "", "path to client log file (disabled if empty)")
-	flags.BoolVar(&hostnameOnly, "hostname-only", lingon.DefaultTerminalHostnameOnly, "show only hostname in connect/disconnect banners")
+	flags.BoolVar(&hostnameOnly, "hostname-only", lingon.DefaultTerminalHostnameOnly, "show only hostname in reconnect banners")
 	flags.BoolVar(&disableDesktopNotifications, "disable-desktop-notifications", lingon.DefaultTerminalDisableDesktopNotifications, "disable best-effort desktop notifications for inactivity walls")
 	flags.StringVar(&themeName, "theme", lingon.DefaultTerminalTheme, "theme for TUI chrome (use `lingon themes` to list)")
 	flags.BoolVar(&traceEnabled, "trace", false, "write a JSONL trace for host/attach TUIs")

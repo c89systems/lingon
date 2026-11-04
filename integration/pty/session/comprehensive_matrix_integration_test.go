@@ -356,7 +356,7 @@ func assertConnectedBannerReplacesDisconnect(t *testing.T, sess *ptytest.PTYSess
 	lastToggle := time.Time{}
 	sess.Eventually(30*time.Second, 50*time.Millisecond, func(screen ptytest.Screen) error {
 		row := screen.Row(0)
-		hasConnected := strings.Contains(row, "connected to ")
+		hasConnected := hasConnectedBanner(row)
 		if hasConnected {
 			return nil
 		}
@@ -374,7 +374,7 @@ func assertHostReconnectedState(t *testing.T, sess *ptytest.PTYSession) {
 	lastToggle := time.Time{}
 	sess.Eventually(10*time.Second, 50*time.Millisecond, func(screen ptytest.Screen) error {
 		row := screen.Row(0)
-		hasConnected := strings.Contains(row, "connected to ")
+		hasConnected := hasConnectedBanner(row)
 		hasDisconnected := strings.Contains(row, "connection lost") || strings.Contains(row, "reconnecting")
 		if hasDisconnected {
 			return fmt.Errorf("expected host reconnected state to clear disconnect banner; got %q", row)

@@ -112,7 +112,7 @@ func TestAttachNewCursorFrameOverridesTabSwitchWakePTY(t *testing.T) {
 					deadline, stop := context.WithTimeout(t.Context(), 5*time.Second)
 					defer stop()
 					if err := viewer.WaitForScreen(deadline, func(s ptytest.Screen) bool {
-						return s.Contains("VIEW_first") && !s.Contains("connected to")
+						return s.Contains("VIEW_first") && !strings.HasSuffix(strings.TrimSpace(s.Row(0)), "connected")
 					}); err != nil {
 						t.Fatal("status expiry barrier:", err)
 					}

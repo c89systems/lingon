@@ -194,7 +194,12 @@ func activeTabLabel(sess *ptytest.PTYSession, labels []string) (string, error) {
 }
 
 func hasConnectionStatusBanner(row string) bool {
-	return strings.Contains(row, "connected to ") || strings.Contains(row, "reconnecting in ")
+	return hasConnectedBanner(row) || strings.Contains(row, "reconnecting in ")
+}
+
+func hasConnectedBanner(row string) bool {
+	row = strings.TrimRight(row, " ")
+	return row == "connected" || strings.HasSuffix(row, " connected")
 }
 
 func uniqueColorLabel(colors map[string]uint32) (string, bool) {

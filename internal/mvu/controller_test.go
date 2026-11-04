@@ -116,7 +116,7 @@ func TestStatusActionFormatsMessages(t *testing.T) {
 	if !res.Changed {
 		t.Fatalf("expected connected status changed")
 	}
-	if !strings.Contains(res.State.ConnectionMessage, "connected to https://relay.example/v1") {
+	if res.State.ConnectionMessage != "connected" {
 		t.Fatalf("unexpected connected message: %q", res.State.ConnectionMessage)
 	}
 
@@ -157,7 +157,7 @@ func TestAttachStatusActionClearsDisconnectThenShowsConnected(t *testing.T) {
 	if state.DisconnectVisible {
 		t.Fatalf("disconnect overlay should be hidden")
 	}
-	if !strings.Contains(state.ConnectionMessage, "connected to https://relay.example/v1") {
+	if state.ConnectionMessage != "connected" {
 		t.Fatalf("unexpected connection message: %q", state.ConnectionMessage)
 	}
 	if state.ConnectionStyle != BannerGreen {

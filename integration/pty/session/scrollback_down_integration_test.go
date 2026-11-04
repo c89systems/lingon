@@ -290,7 +290,7 @@ func TestHostScrollbackIndicatorRightAlignedNoBleedFrom100To0(t *testing.T) {
 	advanceTestClock(h.Clock(), 4*time.Second)
 	eventuallyWithClock(t, host.Clock(), 2*time.Second, 50*time.Millisecond, func() error {
 		row := host.Screen().Row(0)
-		if strings.Contains(row, "connected to ") {
+		if hasConnectedBanner(row) {
 			return ptytest.FormatRowDiff("host", 0, row)
 		}
 		return nil
@@ -393,7 +393,7 @@ func waitForConnectedBannerClear(t *testing.T, host *ptytest.PTYSession, timeout
 	t.Helper()
 	eventuallyWithClock(t, host.Clock(), timeout, 50*time.Millisecond, func() error {
 		screen := host.Screen()
-		if screen.Contains("connected to ") {
+		if hasConnectedBanner(screen.Row(0)) {
 			return ptytest.FormatRowDiff("host", 0, screen.Row(0))
 		}
 		return nil
