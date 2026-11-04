@@ -56,10 +56,12 @@ type Publisher struct {
 	OnInput func([]byte)
 	// OnClipboard performs bounded assembly/admission without waiting for a PTY.
 	// It may invoke reply asynchronously after delivery; Reset cancels pending work.
-	OnClipboard            func(context.Context, *protocolpb.Clipboard, func(*protocolpb.Clipboard))
-	OnClipboardReset       func()
-	OnResize               func(*protocolpb.Resize)
-	OnCommand              func(kind protocolpb.CommandKind)
+	OnClipboard      func(context.Context, *protocolpb.Clipboard, func(*protocolpb.Clipboard))
+	OnClipboardReset func()
+	OnResize         func(*protocolpb.Resize)
+	OnCommand        func(kind protocolpb.CommandKind)
+	// OnManagementComplete runs after a management reply has been written.
+	OnManagementComplete   func(*protocolpb.SessionManagement, *protocolpb.SessionManagement)
 	OnManagement           func(context.Context, *protocolpb.SessionManagement) *protocolpb.SessionManagement
 	management             chan *protocolpb.SessionManagement
 	OnControl              func(holderID string)

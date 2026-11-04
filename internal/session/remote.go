@@ -70,6 +70,7 @@ type remoteView struct {
 }
 
 type remoteOptions struct {
+	Popup                       func(string) *mvu.Popup
 	DisableDesktopNotifications bool
 	DesktopNotifier             desktopnotify.Notifier
 	Endpoint                    string
@@ -94,6 +95,7 @@ type remoteOptions struct {
 }
 
 type remoteManager struct {
+	popup                       func(string) *mvu.Popup
 	endpoint                    string
 	endpointLabel               string
 	token                       string
@@ -159,6 +161,7 @@ func newRemoteManager(opts remoteOptions) *remoteManager {
 		Theme:    theme.TUI(themeName),
 	}})
 	return &remoteManager{
+		popup:                       opts.Popup,
 		endpoint:                    opts.Endpoint,
 		endpointLabel:               config.EndpointDisplay(opts.Endpoint, opts.HostnameOnly),
 		token:                       opts.Token,
@@ -778,6 +781,9 @@ func (m *remoteManager) connectView(ctx context.Context, view *remoteView, stdou
 			Logger:                      m.logger,
 			TokenRefresher:              tokenRefresher,
 			Clock:                       m.clock,
+		}
+		if m.popup != nil {
+			client.Popup = func() *mvu.Popup { return m.popup(session.ID) }
 		}
 		if seedFrom != nil {
 			client.SeedFrom(seedFrom)

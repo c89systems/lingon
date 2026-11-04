@@ -453,6 +453,9 @@ func (h *Harness) startProxy() {
 
 // HostOptions configures a PTY-backed host session.
 type HostOptions struct {
+	// ConfigDir and HeadlessExecutable isolate detached children created by UI tests.
+	ConfigDir          string
+	HeadlessExecutable string
 	// Geometry overrides host startup dimensions independently of the owned outer PTY.
 	Geometry *terminal.WindowSize
 	// AllowRemoteResize publishes a headless-style viewport that controllers may resize.
@@ -552,6 +555,8 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 	}
 	resizeCh := make(chan struct{}, 1)
 	runner := session.New(session.Options{
+		ConfigDir:                   opts.ConfigDir,
+		HeadlessExecutable:          opts.HeadlessExecutable,
 		AllowRemoteResize:           opts.AllowRemoteResize,
 		OnPublishFrame:              opts.OnPublishFrame,
 		ClipboardReader:             opts.ClipboardReader,

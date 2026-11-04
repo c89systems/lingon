@@ -21,6 +21,9 @@ func (p *Publisher) managementLoop(ctx context.Context) {
 			reply.Kind = request.Kind
 			reply.Completed = true
 			p.SendManagement(reply)
+			if p.OnManagementComplete != nil {
+				p.OnManagementComplete(request, reply)
+			}
 		}
 	}
 }

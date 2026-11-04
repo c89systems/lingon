@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"fmt"
 	"strconv"
 
@@ -20,6 +19,11 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 		if local == nil {
 			return sessionmanage.Result{Error: "session is unavailable on this host"}
 		}
+		if req.Kind == "close" {
+			// Commit the close after the transport has written its acknowledgement.
+			// Closing here would tear down the last session's management transport.
+			return sessionmanage.Result{SessionID: local.ID(), Name: local.Name()}
+		}
 		if req.Kind == "rename" {
 			if r.opts.OnRename != nil {
 				if err := r.opts.OnRename(local.ID(), req.Name); err != nil {
@@ -29,6 +33,7 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 			local.nameMu.Lock()
 			local.name = req.Name
 			local.nameMu.Unlock()
+			r.popups.Update(local.ID(), req.Name, nil)
 			if local.publisher != nil {
 				local.publisher.SetSessionName(req.Name)
 				local.publisher.SendManagement(&protocolpb.SessionManagement{Kind: "rename", Name: req.Name, ResultSessionId: local.ID(), Completed: true})
@@ -42,8 +47,7 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 			return sessionmanage.Result{SessionID: local.ID(), Name: req.Name}
 		}
 		// Stable request-derived IDs prevent concurrent retries from launching separate children.
-		sum := sha256.Sum256([]byte(req.SessionID + "\x00" + req.RequestID))
-		id := fmt.Sprintf("terminal-%x", sum[:12])
+		id := sessionmanage.CreatedSessionID(req)
 		cfg := r.opts.ConfigDir
 		if cfg == "" {
 			cfg = config.DefaultConfigDir()
@@ -93,6 +97,13 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 		}
 		return sessionmanage.Result{SessionID: id, Name: id}
 	})
+}
+
+// CompleteManagement applies acknowledged destructive work outside PTY input.
+func (r *Runner) CompleteManagement(req sessionmanage.Request, result sessionmanage.Result) {
+	if req.Kind == "close" && result.Error == "" && result.SessionID == req.SessionID {
+		r.closeLocalSession(req.SessionID, r.stdout(), r.stdin())
+	}
 }
 
 func managementRequestID() string {

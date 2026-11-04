@@ -13,7 +13,7 @@ type Action int
 const (
 	// ActionNone indicates no control action.
 	ActionNone Action = iota
-	// ActionQuit quits the local session/attach.
+	// ActionQuit force-closes the focused session.
 	ActionQuit
 	// ActionSendCtrlD sends an explicit Ctrl-D to the remote session.
 	ActionSendCtrlD
@@ -45,6 +45,14 @@ const (
 	ActionSearch
 	// ActionToggleRestore toggles attachment terminal size restoration.
 	ActionToggleRestore
+	// ActionDetach leaves attach without terminating sessions.
+	ActionDetach
+	// ActionPopup toggles the current tab's popup terminal.
+	ActionPopup
+	// ActionClosePopup terminates the current tab's popup terminal.
+	ActionClosePopup
+	// ActionSSHDisconnect sends Enter followed by the SSH disconnect escape.
+	ActionSSHDisconnect
 )
 
 // Prefix tracks ctrl+l command state.
@@ -66,11 +74,19 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 		switch b {
 		case 'Q':
 			return ActionQuit, nil
+		case 'q':
+			return ActionDetach, nil
+		case 'j':
+			return ActionPopup, nil
+		case 'J':
+			return ActionClosePopup, nil
+		case 'C':
+			return ActionSSHDisconnect, nil
 		case 'd', 'D':
 			return ActionSendCtrlD, nil
 		case 'l', 'L':
 			return ActionNone, []byte{CtrlL}
-		case 'c', 'C':
+		case 'c':
 			return ActionNewPTY, nil
 		case 'e', 'E':
 			return ActionRename, nil

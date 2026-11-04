@@ -38,6 +38,7 @@ import (
 	"pkt.systems/lingon/internal/relayclient"
 	"pkt.systems/lingon/internal/render"
 	"pkt.systems/lingon/internal/retryafter"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/theme"
 	"pkt.systems/lingon/internal/tlsmgr"
@@ -167,6 +168,10 @@ type Client struct {
 	themeName                 string
 
 	OnReady func()
+	// Popup provides an immutable UI-local popup layer for this tab.
+	Popup        func() *mvu.Popup
+	embedded     func() bool
+	embeddedView func(*protocolpb.Snapshot) bool
 	// OnControllerAcquired is invoked when this client becomes the active controller.
 	OnControllerAcquired func()
 	// OnFrame is invoked for each frame received from the server.
@@ -736,6 +741,8 @@ func (c *Client) SetStdout(w io.Writer) {
 // SetCompositor shares an owner-managed overlay compositor for rendering.
 // A nil compositor creates a client-owned runtime with this client's context.
 func (c *Client) SetCompositor(ui *mvu.Runtime) {
+	c.renderMu.Lock()
+	defer c.renderMu.Unlock()
 	c.compositor = ui
 	if ui == nil {
 		c.ensureCompositor()
@@ -1482,6 +1489,9 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	if scrollActive || scrollOffset > 0 {
 		viewSnap = mvu.BuildScrollbackViewFromProto(cols, rows, scrollRows, snap, scrollOffset, scrollCol)
 	}
+	if c.embeddedView != nil && c.embeddedView(viewSnap) {
+		return
+	}
 	compositor := c.ensureCompositor()
 	if c.stdoutWriter() != io.Discard {
 		compositor.ApplyAction(mvu.ScrollbackPercentAction{Visible: scrollbackVisible, Percent: scrollPercent})
@@ -1512,6 +1522,7 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	}
 	frame, err := compositor.RenderAttachFrame(mvu.RuntimeAttachFrameInput{
 		Snapshot:          viewSnap,
+		Popup:             c.popupFrame(),
 		Cols:              cols,
 		Rows:              rows,
 		Cursor:            cursor,
@@ -2485,6 +2496,17 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 				}
 				switch action {
 				case control.ActionQuit:
+					go func() {
+						_, err := c.Manage(ctx, sessionmanage.Request{RequestID: c.newClientID(), SessionID: c.SessionID, Kind: "close"})
+						if err != nil {
+							c.showStatusBanner(mvu.StatusInput{Kind: mvu.StatusError, Message: err.Error(), Duration: 5 * time.Second})
+						}
+					}()
+					return true
+				case control.ActionSSHDisconnect:
+					pending = append(pending, '\r', '~', '.')
+					return flushPending()
+				case control.ActionDetach:
 					_ = ws.Close(websocket.StatusNormalClosure, "detached")
 					return false
 				case control.ActionSendCtrlD:

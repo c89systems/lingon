@@ -324,6 +324,16 @@ func (m *MultiClient) Run(ctx context.Context) error {
 	var activateView func(string) error
 	var createdSessionID string
 	managementBusy := false
+	var popups mvu.Popups
+	popupChanged := make(chan struct{}, 1)
+	closePopups := make(map[string]bool)
+	popupPending := make(map[string][]pendingOp)
+	signalPopup := func() {
+		select {
+		case popupChanged <- struct{}{}:
+		default:
+		}
+	}
 	views := make(map[string]*sessionView)
 	backoffAttempts := make(map[string]int)
 	removedSessions := make(map[string]struct{})
@@ -376,6 +386,14 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		if client != nil && client.HasSnapshot() {
 			client.RenderCurrent()
 		}
+	}
+	focusedClient := func() *Client {
+		mu.Lock()
+		defer mu.Unlock()
+		if view := views[popups.Focus(activeID)]; view != nil {
+			return view.client
+		}
+		return nil
 	}
 	const waitForSessionsGrace = 30 * time.Second
 	var waitMu sync.Mutex
@@ -480,6 +498,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		current := make([]SessionInfo, len(sessions))
 		copy(current, sessions)
 		mu.Unlock()
+		current = popupTabs(current, &popups)
 		muted := map[string]bool{}
 		for _, session := range current {
 			if session.Offline || strings.EqualFold(strings.TrimSpace(session.Status), "offline") {
@@ -872,6 +891,29 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			Trace:                       m.Trace,
 			DesktopNotifier:             m.DesktopNotifier,
 		}
+		client.Popup = func() *mvu.Popup { return popups.Frame(session.ID) }
+		client.embedded = func() bool { return popups.Parent(session.ID) != "" }
+		client.TermSize = func() (int, int) {
+			cols, rows := termSize()
+			if client.isEmbedded() {
+				rows = max(1, mvu.PopupRows(rows))
+			}
+			return cols, rows
+		}
+		client.embeddedView = func(snapshot *protocolpb.Snapshot) bool {
+			if client.isEmbedded() {
+				popups.Update(session.ID, "", snapshot)
+				select {
+				case popupChanged <- struct{}{}:
+				default:
+				}
+				return true
+			}
+			return false
+		}
+		if client.isEmbedded() {
+			client.RequestControl = m.RequestControl
+		}
 		if visible {
 			geometry.bindInitialSession(session.ID)
 		}
@@ -895,6 +937,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				cancelView = latest.cancel
 			}
 			removedSessions[session.ID] = struct{}{}
+			popups.Remove(session.ID)
 			pruned := make([]SessionInfo, 0, len(sessions))
 			for _, info := range sessions {
 				if info.ID == session.ID {
@@ -946,6 +989,10 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			}
 			mu.Unlock()
 			_ = client.applyRestoreManualResize(cctx)
+			if client.isEmbedded() {
+				cols, rows := client.terminalSize()
+				_ = client.SendResize(cctx, cols, rows)
+			}
 			for {
 				for _, op := range pending {
 					if len(op.input) > 0 {
@@ -1049,7 +1096,11 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			}
 			applySessions(updated)
 		}
-		client.compositor = ui
+		if client.isEmbedded() {
+			client.compositor = mvu.NewRuntime()
+		} else {
+			client.compositor = ui
+		}
 		if visible {
 			client.Stdout = renderStdout
 			client.SetStdout(renderStdout)
@@ -1410,15 +1461,17 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				}
 				activeID = nextID
 			}
+			becomingVisible := !view.visible
 			view.visible = true
 			view.hiddenAt = time.Time{}
-			if changedActive && view.client.HasSnapshot() {
+			if (changedActive || becomingVisible) && view.client.HasSnapshot() {
 				// This view's hidden delta baseline is not the physical display.
 				// Reconnects must seed a fresh composed frame as well.
 				// A snapshot-less view instead retains the loading framebuffer
 				// just seeded from the previously displayed terminal.
 				view.client.invalidateDeltaRender()
 			}
+			view.client.SetCompositor(ui)
 			view.client.SetStdout(renderStdout)
 			mouseMode.Set(view.client.ScrollbackActive())
 			if reconnect && view.cancel != nil {
@@ -1638,6 +1691,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			}
 			removed++
 			delete(views, id)
+			popups.Remove(id)
 		}
 		sessions = append(updated, retainedSessions...)
 		if len(sessions) > 0 {
@@ -1655,7 +1709,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		nextActive = activeID
 		if activeID != "" && !mvu.SessionIDExists(mvu.SessionTabSourcesFrom(sessions), activeID) {
-			nextActive = m.pickActiveSession(sessions)
+			nextActive = m.pickActiveSession(popupTabs(sessions, &popups))
 		}
 		if m.Logger != nil {
 			m.Logger.Debug("attach.sessions.apply.done", "removed", removed, "active", activeID)
@@ -1672,6 +1726,24 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		if len(sessions) == 0 {
 			shouldExit = true
+		}
+		mu.Unlock()
+		// Popup connections use the same reconnection and queued-input path as tabs,
+		// but never acquire the physical window's output or restore its size.
+		mu.Lock()
+		for _, info := range sessions {
+			if popups.Parent(info.ID) == "" {
+				continue
+			}
+			popups.Update(info.ID, mvu.SessionLabel(info.ID, info.Name), nil)
+			if views[info.ID] == nil {
+				view, connectErr := connectView(info, false, snapshotViewLocked(false, nil))
+				if connectErr == nil {
+					view.pendingOps = append(view.pendingOps, popupPending[info.ID]...)
+					delete(popupPending, info.ID)
+					views[info.ID] = view
+				}
+			}
 		}
 		mu.Unlock()
 		if nextMissingRefresh >= 0 {
@@ -1926,6 +1998,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		defer mu.Unlock()
 		items := make([]control.SearchSession, 0, len(sessions))
 		for _, s := range sessions {
+			if popups.Parent(s.ID) != "" {
+				continue
+			}
 			items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name)})
 		}
 		return items
@@ -1959,23 +2034,67 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		mu.Unlock()
 		applyConnectionStatus(mvu.StatusInput{Kind: mvu.StatusConnected, Message: "Updating session…", Duration: 15 * time.Second})
 		go func() {
+			defer signalPopup()
 			result, err := client.Manage(ctx, req)
 			if ctx.Err() != nil {
 				return
 			}
 			mu.Lock()
 			managementBusy = false
-			if err == nil && req.Kind == "create" {
+			if err == nil && req.Kind == "create" && popups.Parent(result.SessionID) == "" {
 				createdSessionID = result.SessionID
 			}
 			mu.Unlock()
 			if err != nil {
+				if req.Kind == "create" {
+					id := sessionmanage.CreatedSessionID(req)
+					popups.Remove(id)
+					mu.Lock()
+					delete(popupPending, id)
+					mu.Unlock()
+				}
+				setTabs()
 				applyConnectionStatus(mvu.StatusInput{Kind: mvu.StatusError, Message: err.Error(), Duration: 5 * time.Second})
 				return
 			}
 			clearConnectionStatus()
 			forceRefreshSessions()
 		}()
+	}
+	requestPopupClose := func(id string) {
+		if id != "" {
+			closePopups[id] = true
+			mu.Lock()
+			delete(popupPending, id)
+			if view := views[id]; view != nil {
+				view.pendingOps = nil
+			}
+			mu.Unlock()
+			signalPopup()
+		}
+	}
+	drainPopupClose := func() {
+		mu.Lock()
+		if managementBusy {
+			mu.Unlock()
+			return
+		}
+		var target *Client
+		for id := range closePopups {
+			if popups.Parent(id) == "" && views[id] == nil {
+				delete(closePopups, id)
+				continue
+			}
+			if view := views[id]; view != nil && view.client != nil {
+				target = view.client
+				delete(closePopups, id)
+				break
+			}
+		}
+		mu.Unlock()
+		if target != nil {
+			manageSession(target, sessionmanage.Request{RequestID: target.newClientID(), SessionID: target.SessionID, Kind: "close"})
+		}
 	}
 	var prefix control.Prefix
 	var scrollState scrollInputState
@@ -1984,6 +2103,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		mu.Lock()
 		current := make([]SessionInfo, len(sessions))
 		copy(current, sessions)
+		current = popupTabs(current, &popups)
 		active := activeID
 		mu.Unlock()
 		next := mvu.NextSessionID(mvu.SessionTabSourcesFrom(current), active, delta)
@@ -2003,6 +2123,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			mu.Lock()
 			current = make([]SessionInfo, len(sessions))
 			copy(current, sessions)
+			current = popupTabs(current, &popups)
 			active = activeID
 			mu.Unlock()
 			next = mvu.NextSessionID(mvu.SessionTabSourcesFrom(current), active, delta)
@@ -2028,6 +2149,13 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			return
 		}
 		_ = view.client.processTerminalResize(ctx, sessionAllowsResize(session))
+		mu.Lock()
+		popupView := views[popups.ID(id)]
+		mu.Unlock()
+		if popupView != nil && popupView.client != nil {
+			cols, rows := popupView.client.terminalSize()
+			_ = popupView.client.SendResize(ctx, cols, rows)
+		}
 	}
 	drainPendingResize := func() {
 		for {
@@ -2052,8 +2180,15 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		drainPendingResize()
 		mu.Lock()
-		view := views[activeID]
-		if view == nil && len(views) == 1 {
+		targetID := popups.Focus(activeID)
+		view := views[targetID]
+		if view == nil && popups.Parent(targetID) != "" {
+			popupPending[targetID] = append(popupPending[targetID], pendingOp{input: append([]byte(nil), pending...)})
+			mu.Unlock()
+			pending = pending[:0]
+			return true
+		}
+		if view == nil && targetID == activeID && len(views) == 1 {
 			for _, v := range views {
 				view = v
 				break
@@ -2086,7 +2221,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			queued := append([]byte(nil), pending...)
 			mu.Lock()
 			current := views[viewID]
-			if current == nil && len(views) == 1 {
+			if current == nil && viewID == activeID && len(views) == 1 {
 				for _, v := range views {
 					current = v
 					break
@@ -2152,6 +2287,10 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			}
 			return err
 		case data = <-readCh:
+		case <-popupChanged:
+			drainPopupClose()
+			renderActiveCurrent()
+			continue
 		case <-mouseTimerCh:
 			data = mouseFilter.flush()
 			mouseTimerCh = nil
@@ -2164,7 +2303,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			m.Logger.Debug("attach.stdin.read", "bytes", len(data))
 		}
 		processNormalByte := func(b byte) bool {
-			_, client, _, _, _ := activeViewSnapshot()
+			client := focusedClient()
 			if search.HandlesInput() {
 				result := search.Feed(b, searchSessions())
 				if result.Changed {
@@ -2256,8 +2395,51 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				}
 				switch action {
 				case control.ActionQuit:
+					mu.Lock()
+					focused := popups.Focus(activeID)
+					mu.Unlock()
+					if popups.Parent(focused) != "" {
+						requestPopupClose(focused)
+						return true
+					}
+					if client != nil {
+						manageSession(client, sessionmanage.Request{RequestID: client.newClientID(), SessionID: client.SessionID, Kind: "close"})
+					}
+					return true
+				case control.ActionDetach:
 					cancel()
 					return false
+				case control.ActionSSHDisconnect:
+					pending = append(pending, '\r', '~', '.')
+					return flushPending()
+				case control.ActionPopup:
+					mu.Lock()
+					parent := activeID
+					parentView := views[parent]
+					busy := managementBusy
+					mu.Unlock()
+					if popups.Toggle(parent) {
+						renderActiveCurrent()
+						return true
+					}
+					_, rows := termSize()
+					if mvu.PopupRows(rows) == 0 {
+						showError("Terminal too small for popup", 3*time.Second)
+						return true
+					}
+					if parentView != nil && parentView.client != nil && !busy {
+						req := sessionmanage.Request{RequestID: parentView.client.newClientID(), SessionID: parent, Kind: "create"}
+						id := sessionmanage.CreatedSessionID(req)
+						popups.Add(parent, mvu.Popup{SessionID: id, Name: id})
+						manageSession(parentView.client, req)
+					}
+					return true
+				case control.ActionClosePopup:
+					mu.Lock()
+					id := popups.ID(activeID)
+					mu.Unlock()
+					requestPopupClose(id)
+					return true
 				case control.ActionSendCtrlD:
 					cmdKind = protocolpb.CommandKind_COMMAND_KIND_SEND_EOF
 					cmdSet = true
@@ -2391,8 +2573,14 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			}
 			if cmdSet {
 				mu.Lock()
-				view := views[activeID]
-				if view == nil && len(views) == 1 {
+				targetID := popups.Focus(activeID)
+				view := views[targetID]
+				if view == nil && popups.Parent(targetID) != "" {
+					popupPending[targetID] = append(popupPending[targetID], pendingOp{command: cmdKind})
+					mu.Unlock()
+					return true
+				}
+				if view == nil && targetID == activeID && len(views) == 1 {
 					for _, v := range views {
 						view = v
 						break
@@ -2419,7 +2607,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					var immediateClient *Client
 					mu.Lock()
 					current := views[viewID]
-					if current == nil && len(views) == 1 {
+					if current == nil && viewID == activeID && len(views) == 1 {
 						for _, v := range views {
 							current = v
 							break
@@ -2461,7 +2649,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		filtered := make([]byte, 0, len(data))
 		allHandledByScrollback := true
 		for _, b := range data {
-			_, client, _, _, _ := activeViewSnapshot()
+			client := focusedClient()
 			if client != nil && client.ScrollbackActive() {
 				cmd := scrollState.feed(b)
 				if cmd == scrollExit {
@@ -2524,7 +2712,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		if allHandledByScrollback {
 			continue
 		}
-		_, client, _, _, _ := activeViewSnapshot()
+		client := focusedClient()
 		if !flushMouse {
 			filtered = mouseFilter.feed(filtered)
 			if mouseFilter.ambiguous() {

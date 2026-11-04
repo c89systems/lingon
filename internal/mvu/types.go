@@ -21,6 +21,7 @@ type State struct {
 
 	HelpVisible bool
 	Search      SearchState
+	Popup       *Popup
 
 	ConnectionMessage   string
 	ConnectionStyle     BannerStyle

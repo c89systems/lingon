@@ -14,8 +14,8 @@ func TestPrefixCommands(t *testing.T) {
 	if action, out := p2.Feed(CtrlL); action != ActionNone || len(out) != 0 {
 		t.Fatalf("expected pending only, got action=%v out=%v", action, out)
 	}
-	if action, out := p2.Feed('q'); action != ActionNone || len(out) != 0 {
-		t.Fatalf("expected q to be ignored for prefix commands, got action=%v out=%v", action, out)
+	if action, out := p2.Feed('q'); action != ActionDetach || len(out) != 0 {
+		t.Fatalf("expected detach action, got action=%v out=%v", action, out)
 	}
 }
 

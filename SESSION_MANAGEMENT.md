@@ -3,7 +3,7 @@
 ## Lifecycle contract
 
 Owner clients can create a detached terminal on a connected session's machine
-or rename that session. Local headless clients use the existing owner-permissioned
+rename that session, or force-close it. Local headless clients use the existing owner-permissioned
 Unix socket; remote clients use authenticated `POST /sessions/manage`. Share
 credentials and other accounts cannot manage the session, regardless of their
 terminal control lease. The relay does not execute programs on its own machine.
@@ -32,6 +32,23 @@ Ordinary headful `lingon` retains its in-process `Ctrl+l c` tabs. Attached clien
 create detached sessions with `Ctrl+l c`. CLI rename is `Ctrl+l e`; Android puts
 both actions in Settings, and the Web UI puts them in its session menu. Only the
 creating client selects the new session; other clients discover it normally.
+
+`Ctrl+l j` creates or toggles a popup terminal for the selected tab in host and
+attach. It covers the lower part of the viewport without resizing the parent.
+The covered area, including its themed name/hint bar, is at most 24 rows or half
+the viewport, whichever is smaller. Each tab keeps its own popup. The originating
+UI omits its popup sessions from tab navigation and search; other viewers see
+ordinary sessions. Hiding keeps the terminal running. If its parent closes, the
+popup survives and becomes a normal tab. `Ctrl+l J` explicitly terminates the
+popup, even while hidden.
+
+`Ctrl+l Q` force-closes the focused terminal, including a shown popup, without
+depending on terminal input or EOF handling. Owner-authorized remote close uses
+the management transport; its acknowledgement is written before the host closes
+the session transport. `Ctrl+l q` quits attach without closing any terminals.
+Raw Ctrl+D still leaves attach; `Ctrl+l d` sends a literal Ctrl+D to the terminal.
+`Ctrl+l C` sends exactly carriage return followed by `~.` to disconnect SSH;
+lowercase `c` remains new session.
 
 ## Identity and retries
 

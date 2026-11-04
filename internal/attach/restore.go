@@ -56,6 +56,9 @@ func (w *restoreWindow) latest() terminal.WindowSize {
 }
 
 func (c *Client) restoreEnabled() bool {
+	if c.isEmbedded() {
+		return false
+	}
 	return c.restoreState().Load()
 }
 
@@ -86,6 +89,9 @@ func newRestoreMode(enabled bool) *atomic.Bool {
 // restoreTerminalLocked restores the selected grid once per activation. Ordinary
 // frames do not fight user resizing. renderMu serializes window requests with frames.
 func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
+	if c.isEmbedded() {
+		return
+	}
 	if snap == nil {
 		return
 	}

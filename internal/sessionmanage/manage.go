@@ -2,6 +2,7 @@ package sessionmanage
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -24,19 +25,25 @@ type Result struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// CreatedSessionID identifies the child allocated by an idempotent create request.
+func CreatedSessionID(req Request) string {
+	sum := sha256.Sum256([]byte(req.SessionID + "\x00" + req.RequestID))
+	return fmt.Sprintf("terminal-%x", sum[:12])
+}
+
 // Validate rejects malformed operations and terminal control characters in names.
 func Validate(req Request) error {
 	if req.RequestID == "" || len(req.RequestID) > 128 || req.SessionID == "" || len(req.SessionID) > 256 {
 		return fmt.Errorf("request_id and session_id are required and must be bounded")
 	}
-	if req.Kind != "create" && req.Kind != "rename" {
+	if req.Kind != "create" && req.Kind != "rename" && req.Kind != "close" {
 		return fmt.Errorf("unknown session operation")
 	}
 	if req.Kind == "rename" {
 		return ValidateName(req.Name)
 	}
 	if req.Name != "" {
-		return fmt.Errorf("creation uses the host's default session name")
+		return fmt.Errorf("only rename accepts a session name")
 	}
 	return nil
 }
