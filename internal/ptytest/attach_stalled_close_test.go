@@ -30,7 +30,9 @@ func TestAttachForceCloseUnresponsiveApplicationPTY(t *testing.T) {
 	t.Cleanup(viewer.Cancel)
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("BLOCKED_READY") })
 	viewer.Send("\x0cd\x0ch")
-	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("controls") && s.Contains("session: a-blocked") })
+	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
+		return s.Contains("Copyright (C) 2026 C89 Systems AB") && s.Contains("Ctrl+L h  help")
+	})
 	viewer.Send("q\x0cQ")
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("READY>") && !s.Contains("BLOCKED_READY") })
 	viewer.Send("survived-force-close\r")

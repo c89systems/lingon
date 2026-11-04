@@ -8,14 +8,17 @@ import (
 
 // HelpTitle returns the help modal title with the current Lingon version.
 func HelpTitle() string {
-	return fmt.Sprintf("lingon %s controls", version.Current())
+	return fmt.Sprintf("lingon %s", version.Current())
 }
+
+// HelpCopyright is the copyright notice in terminal help.
+const HelpCopyright = "Copyright (C) 2026 C89 Systems AB https://c89.systems"
 
 // HelpLines returns the help modal content lines.
 func HelpLines(state State) []string {
 	return []string{
 		HelpTitle(),
-		"session: " + state.SessionID,
+		HelpCopyright,
 		"endpoint: " + state.Endpoint,
 		"",
 		"Ctrl+L h  help",

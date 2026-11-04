@@ -36,7 +36,7 @@ func TestAttachShareTokenHelpModalClosesOnQAndQOnly(t *testing.T) {
 	})
 	t.Cleanup(attach.Cancel)
 
-	helpVisibleRe := regexp.MustCompile(`session:\s+host-help-share`)
+	helpVisibleRe := regexp.MustCompile(`Copyright \(C\) 2026 C89 Systems AB`)
 	helpControlRe := regexp.MustCompile(`Ctrl\+L\s+h\s+help`)
 
 	showHelp := func() {
