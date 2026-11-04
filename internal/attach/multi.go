@@ -2346,14 +2346,25 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			if helpVisible {
 				return true
 			}
+			popupEOF := false
 			if b == 0x04 {
-				if !flushPending() {
+				mu.Lock()
+				popupEOF = popups.Focus(activeID) != activeID
+				mu.Unlock()
+				if !popupEOF {
+					if !flushPending() {
+						return false
+					}
+					cancel()
 					return false
 				}
-				cancel()
-				return false
 			}
 			action, out := prefix.Feed(b)
+			if popupEOF && len(out) > 0 {
+				// Use explicit delivery to bypass the host's ordinary remote-EOF
+				// guard. This sends Ctrl+D to the application; it does not kill it.
+				action, out = control.ActionSendCtrlD, nil
+			}
 			cmdKind := protocolpb.CommandKind_COMMAND_KIND_UNSPECIFIED
 			cmdSet := false
 			if action != control.ActionNone {

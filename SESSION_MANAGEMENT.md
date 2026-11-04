@@ -53,7 +53,11 @@ The parent retains normal window-resize behavior.
 depending on terminal input or EOF handling. Owner-authorized remote close uses
 the management transport; its acknowledgement is written before the host closes
 the session transport. `Ctrl+l q` quits attach without closing any terminals.
-Raw Ctrl+D still leaves attach; `Ctrl+l d` sends a literal Ctrl+D to the terminal.
+Raw Ctrl+D leaves attach from an ordinary tab. In a focused popup it passes
+through as normal terminal input, allowing shell logout to close the popup.
+Once focus returns to the parent, the next Ctrl+D detaches attach. Hidden popups
+do not change the parent's detach behavior. `Ctrl+l d` still sends an explicit
+Ctrl+D to the focused terminal.
 `Ctrl+l C` sends exactly carriage return followed by `~.` to disconnect SSH;
 lowercase `c` remains new session.
 
