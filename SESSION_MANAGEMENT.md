@@ -42,6 +42,11 @@ ordinary sessions. Hiding keeps the terminal running. If its parent closes, the
 popup survives and becomes a normal tab. `Ctrl+l J` forcefully terminates the
 popup, even while hidden.
 
+After `Ctrl+l`, `Ctrl+j` is an alias for `j` (show/hide popup), `Ctrl+n` for `n`
+(next tab), `Ctrl+p` for `p` (previous tab), and `Ctrl+t` for `t` (next theme).
+These control keys pass through normally without the prefix. Session search
+remains `Ctrl+l /`.
+
 Popup programs start with the content box's width and height, excluding the bar.
 Creation can supply initial columns and rows; without them, a new session inherits
 the source session's geometry. The PTY is sized before the program starts, and

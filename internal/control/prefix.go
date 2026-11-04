@@ -76,7 +76,7 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionQuit, nil
 		case 'q':
 			return ActionDetach, nil
-		case 'j':
+		case 'j', 0x0a: // Ctrl+J
 			return ActionPopup, nil
 		case 'J':
 			return ActionClosePopup, nil
@@ -101,13 +101,13 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionToggleOffline, nil
 		case 'h', 'H':
 			return ActionHelp, nil
-		case 'n', 'N':
+		case 'n', 'N', 0x0e: // Ctrl+N
 			return ActionNextTab, nil
-		case 'p', 'P':
+		case 'p', 'P', 0x10: // Ctrl+P
 			return ActionPrevTab, nil
 		case 'b', 'B':
 			return ActionToggleTabBar, nil
-		case 't', 'T':
+		case 't', 'T', 0x14: // Ctrl+T
 			return ActionNextTheme, nil
 		case '[':
 			return ActionScrollback, nil
