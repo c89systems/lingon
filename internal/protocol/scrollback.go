@@ -11,6 +11,8 @@ func ScrollbackRowToProto(row terminal.ScrollbackRow) *protocolpb.ScrollbackRow 
 	modes := make([]int32, 0, len(row.Cells))
 	fg := make([]uint32, 0, len(row.Cells))
 	bg := make([]uint32, 0, len(row.Cells))
+	underlineColor := make([]uint32, 0, len(row.Cells))
+	hasUnderlineColor := false
 	graphemes := make([]string, len(row.Cells))
 	hasGraphemes := false
 
@@ -19,20 +21,26 @@ func ScrollbackRowToProto(row terminal.ScrollbackRow) *protocolpb.ScrollbackRow 
 		modes = append(modes, int32(cell.Mode))
 		fg = append(fg, cell.FG)
 		bg = append(bg, cell.BG)
+		underlineColor = append(underlineColor, cell.UnderlineColor)
+		hasUnderlineColor = hasUnderlineColor || cell.UnderlineColor != terminal.ColorDefault
 		if cell.Grapheme != "" {
 			graphemes[i] = cell.Grapheme
 			hasGraphemes = true
 		}
+	}
+	if !hasUnderlineColor {
+		underlineColor = nil
 	}
 	if !hasGraphemes {
 		graphemes = nil
 	}
 
 	return &protocolpb.ScrollbackRow{
-		Runes:     runes,
-		Modes:     modes,
-		Fg:        fg,
-		Bg:        bg,
-		Graphemes: graphemes,
+		Runes:          runes,
+		Modes:          modes,
+		Fg:             fg,
+		UnderlineColor: underlineColor,
+		Bg:             bg,
+		Graphemes:      graphemes,
 	}
 }

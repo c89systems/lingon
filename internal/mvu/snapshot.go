@@ -12,11 +12,12 @@ func BlankSnapshot(cols, rows int) *protocolpb.Snapshot {
 	}
 	size := cols * rows
 	return &protocolpb.Snapshot{
-		Cols:  uint32(cols),
-		Rows:  uint32(rows),
-		Runes: make([]uint32, size),
-		Modes: make([]int32, size),
-		Fg:    make([]uint32, size),
-		Bg:    make([]uint32, size),
+		Cols:           uint32(cols),
+		Rows:           uint32(rows),
+		Runes:          make([]uint32, size),
+		Modes:          make([]int32, size),
+		Fg:             make([]uint32, size),
+		UnderlineColor: make([]uint32, size),
+		Bg:             make([]uint32, size),
 	}
 }

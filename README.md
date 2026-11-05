@@ -14,6 +14,13 @@ It supports these roles and clients:
 The host/attach terminal UI paths use a full-framebuffer MVU runtime
 (`internal/mvu`) as the canonical renderer and state-transition model.
 
+Host and attach preserve single, double, curly, dotted and dashed underlines,
+including their independent colors, in live views and scrollback. This keeps
+Neovim spelling marks distinct from ordinary underlined text. The outer terminal
+must support the [styled-underline sequences](https://sw.kovidgoyal.net/kitty/underlines/).
+For remote sessions, update both the host and attach client so the host captures
+these attributes before sending them.
+
 ![Lingon](lingon.gif)
 
 ## Install

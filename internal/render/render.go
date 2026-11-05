@@ -928,6 +928,7 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 				if idx < len(snap.Bg) {
 					attr.bg = snap.Bg[idx]
 				}
+				attr.underlineColor = colorAt(snap.UnderlineColor, idx)
 				if x+1 < viewCols && isContinuationCell(snap, idx+1, attr) {
 					span = 1
 				}
@@ -971,6 +972,7 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 					if idx < len(snap.Bg) {
 						attr.bg = snap.Bg[idx]
 					}
+					attr.underlineColor = colorAt(snap.UnderlineColor, idx)
 					if x+1 < viewCols && isContinuationCell(snap, idx+1, attr) {
 						skipNext = true
 					}
@@ -1004,13 +1006,14 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 }
 
 type renderAttr struct {
-	mode int32
-	fg   uint32
-	bg   uint32
+	mode           int32
+	fg             uint32
+	bg             uint32
+	underlineColor uint32
 }
 
 func attrEqual(a, b renderAttr) bool {
-	return a.mode == b.mode && a.fg == b.fg && a.bg == b.bg
+	return a.mode == b.mode && a.fg == b.fg && a.bg == b.bg && a.underlineColor == b.underlineColor
 }
 
 func cellEqual(prev, snap *protocolpb.Snapshot, row, col, cols, rows int) bool {
@@ -1043,6 +1046,9 @@ func cellEqual(prev, snap *protocolpb.Snapshot, row, col, cols, rows int) bool {
 			return false
 		}
 	} else if len(prev.Fg) != len(snap.Fg) {
+		return false
+	}
+	if colorAt(prev.UnderlineColor, idx) != colorAt(snap.UnderlineColor, idx) {
 		return false
 	}
 	if idx < len(prev.Bg) && idx < len(snap.Bg) {
@@ -1145,6 +1151,7 @@ func lastNonDefaultCol(snap *protocolpb.Snapshot, row, x0, viewCols, cols, rows 
 			if idx < len(snap.Bg) {
 				attr.bg = snap.Bg[idx]
 			}
+			attr.underlineColor = colorAt(snap.UnderlineColor, idx)
 			wide := false
 			if g != "" {
 				wide = runewidth.StringWidth(g) > 1
@@ -1201,6 +1208,7 @@ func buildRow(snap *protocolpb.Snapshot, row, x0, viewCols, cols, rows int, defa
 			if idx < len(snap.Bg) {
 				attr.bg = snap.Bg[idx]
 			}
+			attr.underlineColor = colorAt(snap.UnderlineColor, idx)
 			wide := false
 			if g != "" {
 				wide = runewidth.StringWidth(g) > 1
@@ -1269,6 +1277,7 @@ func buildRowSpan(snap *protocolpb.Snapshot, row, x0, start, end, cols, rows int
 			if idx < len(snap.Bg) {
 				attr.bg = snap.Bg[idx]
 			}
+			attr.underlineColor = colorAt(snap.UnderlineColor, idx)
 			wide := false
 			if g != "" {
 				wide = runewidth.StringWidth(g) > 1
@@ -1331,6 +1340,9 @@ func isContinuationCell(snap *protocolpb.Snapshot, idx int, attr renderAttr) boo
 	if idx < len(snap.Fg) && snap.Fg[idx] != attr.fg {
 		return false
 	}
+	if colorAt(snap.UnderlineColor, idx) != attr.underlineColor {
+		return false
+	}
 	if idx < len(snap.Bg) && snap.Bg[idx] != attr.bg {
 		return false
 	}
@@ -1353,7 +1365,18 @@ func sgr(attr renderAttr) string {
 		codes = append(codes, "3")
 	}
 	if attr.mode&int32(terminal.ModeUnderline) != 0 {
-		codes = append(codes, "4")
+		style := "4"
+		switch int16(attr.mode) & terminal.ModeUnderlineMask {
+		case terminal.ModeUnderlineDouble:
+			style = "4:2"
+		case terminal.ModeUnderlineCurly:
+			style = "4:3"
+		case terminal.ModeUnderlineDotted:
+			style = "4:4"
+		case terminal.ModeUnderlineDashed:
+			style = "4:5"
+		}
+		codes = append(codes, style)
 	}
 	if attr.mode&int32(terminal.ModeBlink) != 0 {
 		codes = append(codes, "5")
@@ -1367,6 +1390,7 @@ func sgr(attr renderAttr) string {
 
 	codes = append(codes, colorCode(true, fg)...)
 	codes = append(codes, colorCode(false, bg)...)
+	codes = append(codes, underlineColorCode(attr.underlineColor)...)
 
 	return "\x1b[" + strings.Join(codes, ";") + "m"
 }
@@ -1565,4 +1589,23 @@ func ViewportOriginForSnapshot(snap *protocolpb.Snapshot, viewCols, viewRows int
 		cursorY = rows - 1
 	}
 	return ViewportOriginForCursor(cols, rows, viewCols, viewRows, cursorX, cursorY)
+}
+
+func colorAt(colors []uint32, idx int) uint32 {
+	if idx < len(colors) {
+		return colors[idx]
+	}
+	return terminal.ColorDefault
+}
+
+func underlineColorCode(color uint32) []string {
+	raw := color & terminal.ColorValueMask
+	switch color & terminal.ColorFlagMask {
+	case terminal.ColorIndexed, terminal.ColorIndexed256:
+		return []string{"58", "5", strconv.FormatUint(uint64(raw), 10)}
+	case terminal.ColorTrue:
+		return []string{"58", "2", strconv.FormatUint(uint64(raw>>16&255), 10), strconv.FormatUint(uint64(raw>>8&255), 10), strconv.FormatUint(uint64(raw&255), 10)}
+	}
+	// Each attribute run starts with SGR 0, which also resets underline color.
+	return nil
 }

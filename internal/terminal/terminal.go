@@ -17,11 +17,12 @@ type Cursor struct {
 
 // Cell represents a terminal cell's content and attributes.
 type Cell struct {
-	Rune     rune
-	Grapheme string
-	Mode     int16
-	FG       uint32
-	BG       uint32
+	Rune           rune
+	Grapheme       string
+	Mode           int16
+	FG             uint32
+	BG             uint32
+	UnderlineColor uint32
 }
 
 // Snapshot captures terminal state for resync.
@@ -54,6 +55,16 @@ const (
 	ModeBlink     int16 = 1 << 4
 	ModeInverse   int16 = 1 << 5
 	ModeHidden    int16 = 1 << 6
+)
+
+// Underline variants retain ModeUnderline so consumers without styled-underline
+// support still see underlined text. The remaining bits encode the variant.
+const (
+	ModeUnderlineMask   int16 = ModeUnderline | 7<<7
+	ModeUnderlineDouble int16 = ModeUnderline | 1<<7
+	ModeUnderlineCurly  int16 = ModeUnderline | 2<<7
+	ModeUnderlineDotted int16 = ModeUnderline | 3<<7
+	ModeUnderlineDashed int16 = ModeUnderline | 4<<7
 )
 
 // Color encoding flags for snapshot cells.

@@ -11,6 +11,8 @@ func SnapshotToProto(s terminal.Snapshot) *protocolpb.Snapshot {
 	modes := make([]int32, 0, len(s.Cells))
 	fg := make([]uint32, 0, len(s.Cells))
 	bg := make([]uint32, 0, len(s.Cells))
+	underlineColor := make([]uint32, 0, len(s.Cells))
+	hasUnderlineColor := false
 	graphemes := make([]string, len(s.Cells))
 	hasGraphemes := false
 
@@ -19,27 +21,33 @@ func SnapshotToProto(s terminal.Snapshot) *protocolpb.Snapshot {
 		modes = append(modes, int32(cell.Mode))
 		fg = append(fg, cell.FG)
 		bg = append(bg, cell.BG)
+		underlineColor = append(underlineColor, cell.UnderlineColor)
+		hasUnderlineColor = hasUnderlineColor || cell.UnderlineColor != terminal.ColorDefault
 		if cell.Grapheme != "" {
 			graphemes[i] = cell.Grapheme
 			hasGraphemes = true
 		}
+	}
+	if !hasUnderlineColor {
+		underlineColor = nil
 	}
 	if !hasGraphemes {
 		graphemes = nil
 	}
 
 	return &protocolpb.Snapshot{
-		Cols:          uint32(s.Cols),
-		Rows:          uint32(s.Rows),
-		Runes:         runes,
-		Modes:         modes,
-		Fg:            fg,
-		Bg:            bg,
-		Cursor:        &protocolpb.Cursor{X: uint32(s.Cursor.X), Y: uint32(s.Cursor.Y)},
-		CursorVisible: s.CursorVisible,
-		Mode:          s.Mode,
-		Title:         s.Title,
-		Graphemes:     graphemes,
+		Cols:           uint32(s.Cols),
+		Rows:           uint32(s.Rows),
+		Runes:          runes,
+		Modes:          modes,
+		Fg:             fg,
+		UnderlineColor: underlineColor,
+		Bg:             bg,
+		Cursor:         &protocolpb.Cursor{X: uint32(s.Cursor.X), Y: uint32(s.Cursor.Y)},
+		CursorVisible:  s.CursorVisible,
+		Mode:           s.Mode,
+		Title:          s.Title,
+		Graphemes:      graphemes,
 	}
 }
 
@@ -60,6 +68,9 @@ func SnapshotFromProto(snap *protocolpb.Snapshot) terminal.Snapshot {
 		}
 		if i < len(snap.Fg) {
 			cells[i].FG = snap.Fg[i]
+		}
+		if i < len(snap.UnderlineColor) {
+			cells[i].UnderlineColor = snap.UnderlineColor[i]
 		}
 		if i < len(snap.Bg) {
 			cells[i].BG = snap.Bg[i]

@@ -70,16 +70,17 @@ func protoSnapshotFromTerminalSnapshot(s terminal.Snapshot) (*protocolpb.Snapsho
 		return nil, fmt.Errorf("terminal snapshot cells mismatch: have=%d need=%d", len(s.Cells), size)
 	}
 	out := &protocolpb.Snapshot{
-		Cols:          uint32(s.Cols),
-		Rows:          uint32(s.Rows),
-		Runes:         make([]uint32, size),
-		Modes:         make([]int32, size),
-		Fg:            make([]uint32, size),
-		Bg:            make([]uint32, size),
-		Cursor:        &protocolpb.Cursor{X: uint32(s.Cursor.X), Y: uint32(s.Cursor.Y)},
-		CursorVisible: s.CursorVisible,
-		Mode:          s.Mode,
-		Title:         s.Title,
+		Cols:           uint32(s.Cols),
+		Rows:           uint32(s.Rows),
+		Runes:          make([]uint32, size),
+		Modes:          make([]int32, size),
+		Fg:             make([]uint32, size),
+		UnderlineColor: make([]uint32, size),
+		Bg:             make([]uint32, size),
+		Cursor:         &protocolpb.Cursor{X: uint32(s.Cursor.X), Y: uint32(s.Cursor.Y)},
+		CursorVisible:  s.CursorVisible,
+		Mode:           s.Mode,
+		Title:          s.Title,
 	}
 	hasGrapheme := false
 	for i := 0; i < size; i++ {
@@ -88,6 +89,7 @@ func protoSnapshotFromTerminalSnapshot(s terminal.Snapshot) (*protocolpb.Snapsho
 		out.Modes[i] = int32(cell.Mode)
 		out.Fg[i] = cell.FG
 		out.Bg[i] = cell.BG
+		out.UnderlineColor[i] = cell.UnderlineColor
 		if cell.Grapheme != "" {
 			hasGrapheme = true
 		}

@@ -655,6 +655,9 @@ func snapshotToScrollbackRows(snap *protocolpb.Snapshot) []terminal.ScrollbackRo
 			if idx < len(snap.Bg) {
 				cell.BG = snap.Bg[idx]
 			}
+			if idx < len(snap.UnderlineColor) {
+				cell.UnderlineColor = snap.UnderlineColor[idx]
+			}
 			if idx < len(snap.Graphemes) {
 				cell.Grapheme = snap.Graphemes[idx]
 			}
@@ -1540,16 +1543,17 @@ func cloneSnapshot(snap *protocolpb.Snapshot) *protocolpb.Snapshot {
 		return nil
 	}
 	out := &protocolpb.Snapshot{
-		Cols:          snap.GetCols(),
-		Rows:          snap.GetRows(),
-		Runes:         append([]uint32(nil), snap.GetRunes()...),
-		Modes:         append([]int32(nil), snap.GetModes()...),
-		Fg:            append([]uint32(nil), snap.GetFg()...),
-		Bg:            append([]uint32(nil), snap.GetBg()...),
-		CursorVisible: snap.GetCursorVisible(),
-		Mode:          snap.GetMode(),
-		Title:         snap.GetTitle(),
-		Graphemes:     append([]string(nil), snap.GetGraphemes()...),
+		Cols:           snap.GetCols(),
+		Rows:           snap.GetRows(),
+		Runes:          append([]uint32(nil), snap.GetRunes()...),
+		Modes:          append([]int32(nil), snap.GetModes()...),
+		Fg:             append([]uint32(nil), snap.GetFg()...),
+		UnderlineColor: append([]uint32(nil), snap.GetUnderlineColor()...),
+		Bg:             append([]uint32(nil), snap.GetBg()...),
+		CursorVisible:  snap.GetCursorVisible(),
+		Mode:           snap.GetMode(),
+		Title:          snap.GetTitle(),
+		Graphemes:      append([]string(nil), snap.GetGraphemes()...),
 	}
 	if snap.Cursor != nil {
 		out.Cursor = &protocolpb.Cursor{X: snap.Cursor.GetX(), Y: snap.Cursor.GetY()}
@@ -1669,12 +1673,13 @@ func blankSnapshot(cols, rows int) *protocolpb.Snapshot {
 	}
 	size := cols * rows
 	return &protocolpb.Snapshot{
-		Cols:  uint32(cols),
-		Rows:  uint32(rows),
-		Runes: make([]uint32, size),
-		Modes: make([]int32, size),
-		Fg:    make([]uint32, size),
-		Bg:    make([]uint32, size),
+		Cols:           uint32(cols),
+		Rows:           uint32(rows),
+		Runes:          make([]uint32, size),
+		Modes:          make([]int32, size),
+		Fg:             make([]uint32, size),
+		UnderlineColor: make([]uint32, size),
+		Bg:             make([]uint32, size),
 	}
 }
 
@@ -1707,6 +1712,9 @@ func copySnapshotRegionFromOffset(dst, src *protocolpb.Snapshot, originCol, orig
 	if rows <= 0 || cols <= 0 {
 		return
 	}
+	if len(dst.UnderlineColor) == 0 {
+		dst.UnderlineColor = make([]uint32, dstCols*dstRows)
+	}
 	if len(src.GetGraphemes()) > 0 && len(dst.Graphemes) == 0 {
 		dst.Graphemes = make([]string, dstCols*dstRows)
 	}
@@ -1727,6 +1735,11 @@ func copySnapshotRegionFromOffset(dst, src *protocolpb.Snapshot, originCol, orig
 			}
 			if srcIdx < len(src.Bg) {
 				dst.Bg[dstIdx] = src.Bg[srcIdx]
+			}
+			if srcIdx < len(src.UnderlineColor) {
+				dst.UnderlineColor[dstIdx] = src.UnderlineColor[srcIdx]
+			} else {
+				dst.UnderlineColor[dstIdx] = terminal.ColorDefault
 			}
 			if len(dst.Graphemes) > 0 {
 				if srcIdx < len(src.Graphemes) {
@@ -1764,6 +1777,9 @@ func copySnapshotRegionAtOffset(dst, src *protocolpb.Snapshot, originCol, origin
 	if rows <= 0 || cols <= 0 {
 		return
 	}
+	if len(dst.UnderlineColor) == 0 {
+		dst.UnderlineColor = make([]uint32, dstCols*dstRows)
+	}
 	if len(src.GetGraphemes()) > 0 && len(dst.Graphemes) == 0 {
 		dst.Graphemes = make([]string, dstCols*dstRows)
 	}
@@ -1784,6 +1800,11 @@ func copySnapshotRegionAtOffset(dst, src *protocolpb.Snapshot, originCol, origin
 			}
 			if srcIdx < len(src.Bg) {
 				dst.Bg[dstIdx] = src.Bg[srcIdx]
+			}
+			if srcIdx < len(src.UnderlineColor) {
+				dst.UnderlineColor[dstIdx] = src.UnderlineColor[srcIdx]
+			} else {
+				dst.UnderlineColor[dstIdx] = terminal.ColorDefault
 			}
 			if len(dst.Graphemes) > 0 {
 				if srcIdx < len(src.Graphemes) {

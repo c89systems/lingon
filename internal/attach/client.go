@@ -1220,6 +1220,7 @@ func shiftScrollbackLive(snap *protocolpb.Snapshot, rows int) *protocolpb.Snapsh
 	shiftScrollbackCells(next.Modes, count)
 	shiftScrollbackCells(next.Fg, count)
 	shiftScrollbackCells(next.Bg, count)
+	shiftScrollbackCells(next.UnderlineColor, count)
 	shiftScrollbackCells(next.Graphemes, count)
 	return next
 }
@@ -1426,13 +1427,14 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 			}
 		}
 		c.lastSnapshot = &protocolpb.Snapshot{
-			Cols:      uint32(cols),
-			Rows:      uint32(rows),
-			Runes:     make([]uint32, cols*rows),
-			Modes:     make([]int32, cols*rows),
-			Fg:        make([]uint32, cols*rows),
-			Bg:        make([]uint32, cols*rows),
-			Graphemes: nil,
+			Cols:           uint32(cols),
+			Rows:           uint32(rows),
+			Runes:          make([]uint32, cols*rows),
+			Modes:          make([]int32, cols*rows),
+			Fg:             make([]uint32, cols*rows),
+			UnderlineColor: make([]uint32, cols*rows),
+			Bg:             make([]uint32, cols*rows),
+			Graphemes:      nil,
 		}
 		if hasGraphemes {
 			c.lastSnapshot.Graphemes = make([]string, cols*rows)
@@ -1440,6 +1442,9 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 	}
 
 	snap := c.lastSnapshot
+	if len(snap.UnderlineColor) == 0 {
+		snap.UnderlineColor = make([]uint32, cols*rows)
+	}
 	if len(snap.Graphemes) == 0 {
 		for _, row := range diff.DiffRows {
 			if len(row.Graphemes) > 0 {
@@ -1467,6 +1472,11 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 			}
 			if x < len(row.Bg) {
 				snap.Bg[idx] = row.Bg[x]
+			}
+			if x < len(row.UnderlineColor) {
+				snap.UnderlineColor[idx] = row.UnderlineColor[x]
+			} else {
+				snap.UnderlineColor[idx] = terminal.ColorDefault
 			}
 			if len(snap.Graphemes) > 0 && x < len(row.Graphemes) {
 				snap.Graphemes[idx] = row.Graphemes[x]

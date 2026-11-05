@@ -185,6 +185,11 @@ func copyPopupCells(dst *protocolpb.Snapshot, row int, src *protocolpb.Snapshot)
 	copy(dst.Modes[start:], src.Modes)
 	copy(dst.Fg[start:], src.Fg)
 	copy(dst.Bg[start:], src.Bg)
+	if len(dst.UnderlineColor) == 0 {
+		dst.UnderlineColor = make([]uint32, len(dst.Runes))
+	}
+	clear(dst.UnderlineColor[start : start+len(src.Runes)])
+	copy(dst.UnderlineColor[start:], src.UnderlineColor)
 	if len(src.Graphemes) != 0 && len(dst.Graphemes) == 0 {
 		dst.Graphemes = make([]string, len(dst.Runes))
 	}

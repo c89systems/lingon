@@ -18,6 +18,7 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 	modes := make([]int32, size)
 	fg := make([]uint32, size)
 	bg := make([]uint32, size)
+	underlineColor := make([]uint32, size)
 	var graphemes []string
 	hasGraphemes := false
 	if len(live.Graphemes) > 0 {
@@ -40,6 +41,7 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 			modes[idx] = int32(cell.Mode)
 			fg[idx] = cell.FG
 			bg[idx] = cell.BG
+			underlineColor[idx] = cell.UnderlineColor
 			if graphemes != nil && cell.Grapheme != "" {
 				graphemes[idx] = cell.Grapheme
 				hasGraphemes = true
@@ -74,6 +76,9 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 					if idx < len(live.Bg) {
 						bg[dst] = live.Bg[idx]
 					}
+					if idx < len(live.UnderlineColor) {
+						underlineColor[dst] = live.UnderlineColor[idx]
+					}
 					if graphemes != nil && idx < len(live.Graphemes) {
 						graphemes[dst] = live.Graphemes[idx]
 						if live.Graphemes[idx] != "" {
@@ -83,9 +88,9 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 				}
 			}
 		}
-		normalizeTrailingBlankAttrs(viewRow, cols, runes, modes, fg, bg, graphemes)
+		normalizeTrailingBlankAttrs(viewRow, cols, runes, modes, fg, bg, underlineColor, graphemes)
 	}
-	return finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, graphemes, hasGraphemes)
+	return finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, underlineColor, graphemes, hasGraphemes)
 }
 
 // BuildScrollbackViewFromProto composes a snapshot view that includes protocol
@@ -101,6 +106,7 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 	modes := make([]int32, size)
 	fg := make([]uint32, size)
 	bg := make([]uint32, size)
+	underlineColor := make([]uint32, size)
 	var graphemes []string
 	hasGraphemes := false
 	if len(live.Graphemes) > 0 {
@@ -126,6 +132,9 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 			}
 			if srcCol >= 0 && srcCol < len(row.Bg) {
 				bg[idx] = row.Bg[srcCol]
+			}
+			if srcCol >= 0 && srcCol < len(row.UnderlineColor) {
+				underlineColor[idx] = row.UnderlineColor[srcCol]
 			}
 			if graphemes != nil && srcCol >= 0 && srcCol < len(row.Graphemes) {
 				graphemes[idx] = row.Graphemes[srcCol]
@@ -163,6 +172,9 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 					if idx < len(live.Bg) {
 						bg[dst] = live.Bg[idx]
 					}
+					if idx < len(live.UnderlineColor) {
+						underlineColor[dst] = live.UnderlineColor[idx]
+					}
 					if graphemes != nil && idx < len(live.Graphemes) {
 						graphemes[dst] = live.Graphemes[idx]
 						if live.Graphemes[idx] != "" {
@@ -172,12 +184,12 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 				}
 			}
 		}
-		normalizeTrailingBlankAttrs(viewRow, cols, runes, modes, fg, bg, graphemes)
+		normalizeTrailingBlankAttrs(viewRow, cols, runes, modes, fg, bg, underlineColor, graphemes)
 	}
-	return finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, graphemes, hasGraphemes)
+	return finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, underlineColor, graphemes, hasGraphemes)
 }
 
-func normalizeTrailingBlankAttrs(row, cols int, runes []uint32, modes []int32, fg []uint32, bg []uint32, graphemes []string) {
+func normalizeTrailingBlankAttrs(row, cols int, runes []uint32, modes []int32, fg []uint32, bg []uint32, underlineColor []uint32, graphemes []string) {
 	rowStart := row * cols
 	rowEnd := rowStart + cols - 1
 	for idx := rowEnd; idx >= rowStart; idx-- {
@@ -199,6 +211,9 @@ func normalizeTrailingBlankAttrs(row, cols int, runes []uint32, modes []int32, f
 		}
 		if idx < len(fg) {
 			fg[idx] = terminal.ColorDefault
+		}
+		if idx < len(underlineColor) {
+			underlineColor[idx] = terminal.ColorDefault
 		}
 		if idx < len(bg) {
 			bg[idx] = terminal.ColorDefault
@@ -275,23 +290,24 @@ func scrollbackProtoWidth(scrollback []*protocolpb.ScrollbackRow, live *protocol
 	return width
 }
 
-func finalizeScrollbackView(cols, viewRows, start, scrollbackCount int, live *protocolpb.Snapshot, runes []uint32, modes []int32, fg []uint32, bg []uint32, graphemes []string, hasGraphemes bool) *protocolpb.Snapshot {
+func finalizeScrollbackView(cols, viewRows, start, scrollbackCount int, live *protocolpb.Snapshot, runes []uint32, modes []int32, fg []uint32, bg []uint32, underlineColor []uint32, graphemes []string, hasGraphemes bool) *protocolpb.Snapshot {
 	if !hasGraphemes {
 		graphemes = nil
 	}
 	_ = start
 	_ = scrollbackCount
 	out := &protocolpb.Snapshot{
-		Cols:          uint32(cols),
-		Rows:          uint32(viewRows),
-		Runes:         runes,
-		Modes:         modes,
-		Fg:            fg,
-		Bg:            bg,
-		Graphemes:     graphemes,
-		Mode:          live.Mode,
-		Title:         live.Title,
-		CursorVisible: false,
+		Cols:           uint32(cols),
+		Rows:           uint32(viewRows),
+		Runes:          runes,
+		Modes:          modes,
+		Fg:             fg,
+		Bg:             bg,
+		UnderlineColor: underlineColor,
+		Graphemes:      graphemes,
+		Mode:           live.Mode,
+		Title:          live.Title,
+		CursorVisible:  false,
 	}
 	if live.Cursor != nil && viewRows > 0 && cols > 0 {
 		// Keep a visible cursor anchor inside the viewport while in scrollback mode.

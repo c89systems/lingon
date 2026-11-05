@@ -354,6 +354,9 @@ func cloneProtoScrollbackRow(row *protocolpb.ScrollbackRow) *protocolpb.Scrollba
 	if len(row.Fg) > 0 {
 		out.Fg = append(out.Fg, row.Fg...)
 	}
+	if len(row.UnderlineColor) > 0 {
+		out.UnderlineColor = append(out.UnderlineColor, row.UnderlineColor...)
+	}
 	if len(row.Bg) > 0 {
 		out.Bg = append(out.Bg, row.Bg...)
 	}
