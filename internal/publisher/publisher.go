@@ -22,6 +22,7 @@ import (
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/relaywire"
 	"pkt.systems/lingon/internal/retryafter"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/pslog"
 )
@@ -471,7 +472,7 @@ func (p *Publisher) helloFrame() *protocolpb.Frame {
 	return &protocolpb.Frame{
 		SessionId: p.opts.SessionID,
 		Payload: &protocolpb.Frame_Hello{Hello: &protocolpb.Hello{
-			ClientId: strings.TrimSpace(p.opts.SessionName),
+			ClientId: sessionmanage.NormalizeName(strings.TrimSpace(p.opts.SessionName)),
 			Cols:     uint32(p.opts.Cols), Rows: uint32(p.opts.Rows),
 			WantsControl: p.opts.PublishControl, ClientType: "host", Headless: p.opts.Headless,
 		}},

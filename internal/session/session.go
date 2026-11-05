@@ -304,6 +304,7 @@ func (r *Runner) initializeSessionIdentity() {
 			r.sessionName = defaultSessionName()
 		}
 	}
+	r.sessionName = sessionmanage.NormalizeName(r.sessionName)
 	if r.sessionName != "" {
 		r.sessionBase = r.sessionName
 	} else if r.opts.SessionID != "" {
@@ -558,7 +559,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 			}
 			items := searchSessions()
 			view := search.View(items)
-			r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID}})
+			r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: view.Active, Important: view.Important, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID}})
 			r.forceRedraw(stdout)
 		}
 		pending := make([]byte, 0, 4096)
@@ -662,6 +663,9 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 			processNormalByte := func(b byte) bool {
 				if search.HandlesInput() {
 					result := search.Feed(b, searchSessions())
+					if len(result.SessionIDs) > 0 {
+						r.runtime().ApplyAction(mvu.ImportantTabsAction{SessionIDs: result.SessionIDs})
+					}
 					if result.Changed {
 						showSearch()
 					}
@@ -722,10 +726,15 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 					}
 					r.setTabSuppressed(activeID, false)
 					switch action {
-					case control.ActionToggleImportant, control.ActionResetImportant:
-						parent, _ := r.activeSession()
-						r.runtime().ApplyAction(mvu.ImportantTabAction{SessionID: parent, Reset: action == control.ActionResetImportant})
+					case control.ActionResetImportant:
+						r.runtime().ApplyAction(mvu.ImportantTabsAction{Reset: true})
 						r.forceRedraw(stdout)
+						return true
+					case control.ActionToggleImportant:
+						parent, _ := r.activeSession()
+						searchImportant.Store(false)
+						search.BeginImportant(r.clock, showSearch, parent, searchSessions())
+						showSearch()
 						return true
 					case control.ActionSearch, control.ActionSearchImportant:
 						parent, _ := r.activeSession()

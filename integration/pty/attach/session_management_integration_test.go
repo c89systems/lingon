@@ -72,7 +72,7 @@ func TestSessionManagementLocalCLI(t *testing.T) {
 			return err
 		}
 		rec := state.Sessions[source]
-		if rec.Name != "Local build 🦊" || rec.SocketPath != original {
+		if rec.Name != "Local_build_🦊" || rec.SocketPath != original {
 			return fmt.Errorf("rename metadata: %+v", rec)
 		}
 		return nil
@@ -234,7 +234,7 @@ func TestSessionManagementRelayAndHeadfulCLI(t *testing.T) {
 	waitForPromptVisible(t, host, 8*time.Second)
 	waitForSessionsWithTimeout(t, h.Clock(), h.Endpoint(), h.AccessToken(), []string{"management-host"}, 8*time.Second)
 	host.Send("\x0ceHeadful renamed\r")
-	if id, err := waitForSessionName(t, h.Clock(), h.Endpoint(), h.AccessToken(), "Headful renamed", 8*time.Second); err != nil || id != "management-host" {
+	if id, err := waitForSessionName(t, h.Clock(), h.Endpoint(), h.AccessToken(), "Headful_renamed", 8*time.Second); err != nil || id != "management-host" {
 		t.Fatalf("headful rename identity: %s %v", id, err)
 	}
 	client := &attach.Client{Endpoint: h.Endpoint(), AccessToken: h.AccessToken(), SessionID: "management-host", Insecure: true}
@@ -264,7 +264,7 @@ func TestSessionManagementRelayAndHeadfulCLI(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if state.Sessions[result.SessionID].Name != "Remote build" {
+		if state.Sessions[result.SessionID].Name != "Remote_build" {
 			return fmt.Errorf("remote rename not persisted")
 		}
 		return nil
@@ -290,7 +290,7 @@ func TestSessionManagementRelayAndHeadfulCLI(t *testing.T) {
 			return err
 		}
 		for _, row := range rows {
-			if row.ID == result.SessionID && row.Name == "Remote build" {
+			if row.ID == result.SessionID && row.Name == "Remote_build" {
 				return nil
 			}
 		}

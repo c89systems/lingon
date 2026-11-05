@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/sessionorder"
 )
 
@@ -77,6 +78,10 @@ func LoadStoreFromBytes(data []byte) (*Store, error) {
 	if s.RefreshTokens == nil {
 		s.RefreshTokens = make(map[string]RefreshToken)
 	}
+	for id, session := range s.Sessions {
+		session.Name = sessionmanage.NormalizeName(session.Name)
+		s.Sessions[id] = session
+	}
 	return &s, nil
 }
 
@@ -142,6 +147,7 @@ func (s *Store) RevokeTokensForUsername(username string) {
 func (s *Store) CreateSession(session Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	session.Name = sessionmanage.NormalizeName(session.Name)
 	s.Sessions[session.ID] = session
 }
 
@@ -395,7 +401,7 @@ func (s *Store) SetSessionName(id, name string) (Session, bool) {
 	if !ok {
 		return Session{}, false
 	}
-	session.Name = name
+	session.Name = sessionmanage.NormalizeName(name)
 	s.Sessions[id] = session
 	return session, true
 }

@@ -20,6 +20,7 @@ import (
 	"pkt.systems/lingon/internal/pty"
 	"pkt.systems/lingon/internal/publisher"
 	"pkt.systems/lingon/internal/render"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/terminal/emu"
 	"pkt.systems/lingon/internal/trace"
@@ -463,7 +464,7 @@ func newLocalSession(parent context.Context, opts localSessionOptions) *localSes
 	}
 	session := &localSession{
 		id:                opts.ID,
-		name:              opts.Name,
+		name:              sessionmanage.NormalizeName(opts.Name),
 		shell:             opts.Shell,
 		term:              opts.Term,
 		cols:              opts.Cols,

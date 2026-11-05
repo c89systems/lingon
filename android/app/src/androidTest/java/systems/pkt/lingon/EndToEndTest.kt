@@ -433,7 +433,7 @@ class EndToEndTest {
         composeRule.onNodeWithTag(TestTags.RenameSessionInput).performTextReplacement("Android build 🦊")
         composeRule.onNodeWithTag(TestTags.RenameSessionSave).performClick()
         waitUntilNoError(10_000) {
-            appViewModel().state.value.sessions.any { it.id == created && it.name == "Android build 🦊" }
+            appViewModel().state.value.sessions.any { it.id == created && it.name == "Android_build_🦊" }
         }
         assertEquals(created, appViewModel().state.value.activeSessionId)
         assertTerminalResponsive(sessionId = original)

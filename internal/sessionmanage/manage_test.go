@@ -59,14 +59,28 @@ func TestManagementBoundsReceiptsAndValidatesNames(t *testing.T) {
 	if len(m.receipts) != 256 || len(m.order) != 256 {
 		t.Fatal("receipt cache is unbounded")
 	}
-	for _, name := range []string{"", " name", "name ", "line\nname", "\x1b[2J", "hidden\u202ename", string([]byte{0xff})} {
+	for _, name := range []string{"", " name", "name ", "build server", "日本語\u00a0🦊", "line\nname", "\x1b[2J", "hidden\u202ename", string([]byte{0xff})} {
 		if ValidateName(name) == nil {
 			t.Errorf("accepted %q", name)
 		}
 	}
-	for _, name := range []string{"build server", "日本語 🦊"} {
+	for _, name := range []string{"build_server", "日本語_🦊"} {
 		if err := ValidateName(name); err != nil {
 			t.Error(err)
+		}
+	}
+}
+
+func TestNormalizeName(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"build server", "build_server"}, {"two  spaces", "two__spaces"},
+		{" 日本語\u00a0🦊 ", "_日本語_🦊_"}, {"build.prod-1", "build.prod-1"},
+		{"line\nname", "line\nname"}, {"tab\tname", "tab\tname"},
+		{string([]byte{0xff}), string([]byte{0xff})},
+	} {
+		got := NormalizeName(tc.input)
+		if got != tc.want || NormalizeName(got) != got {
+			t.Fatalf("NormalizeName(%q)=%q want %q", tc.input, got, tc.want)
 		}
 	}
 }

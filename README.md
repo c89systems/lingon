@@ -369,10 +369,20 @@ the window.
 
 #### Mark important tabs
 
-In the interactive host or `lingon attach`, `Ctrl+l i` toggles whether the current
-tab is important. `Ctrl+l Ctrl+i` is an alias (the second key is also Tab). The first
-mark enters important-tab mode: the bar and unmarked tabs use a darker variant
-of the selected theme, while marked tabs keep their normal colors. The active
+In the interactive host or `lingon attach`, `Ctrl+l i` opens the `i` prompt with
+the current tab's name and a trailing space. `Ctrl+l Ctrl+i` is an alias (the second
+key is also Tab). Enter immediately toggles the current tab. To toggle several
+tabs together, type space-separated names or prefixes; Tab completes and appends
+a name followed by a space. Tab on an empty entry appends the next unlisted tab
+relative to the last completion, with Shift+Tab going backwards. Ctrl+W deletes
+one whole space-separated name, including dots, hyphens and underscores. Escape
+or Ctrl+C cancels without changing marks. Enter applies each selected tab once,
+without switching tabs. Missing or ambiguous typed names keep the prompt open
+and apply nothing; Tab-completed entries retain their session identity even when
+names are duplicated.
+
+The first mark enters important-tab mode: the bar and unmarked tabs use a darker
+variant of the selected theme, while marked tabs keep their normal colors. The active
 non-important tab has a brighter background and readable text, with bold and
 underline to make focus clear. Inactive non-important tabs stay dark. Marking an
 already important tab removes its mark; removing the last mark leaves the mode.
@@ -461,7 +471,9 @@ track the running shell's current directory.
 
 Names are display metadata: renaming preserves the session ID, socket filename,
 connections, and share tokens. Use the original ID for CLI session arguments.
-Names support 1–80 Unicode characters without control characters. Headless names
+Names support 1–80 Unicode characters without control characters. Spaces are
+automatically replaced with underscores when starting or renaming sessions,
+including names loaded from local or relay state. Headless names
 persist locally and are advertised again on relay reconnect. Interactive names
 last for that host process's lifetime. If a request's response is lost, refresh
 the session list before trying again; clients do not automatically repeat

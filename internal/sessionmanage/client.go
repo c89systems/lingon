@@ -12,6 +12,9 @@ import (
 
 // Call executes one management request. It deliberately never retries mutations.
 func Call(ctx context.Context, client *http.Client, endpoint, token string, req Request) (Result, error) {
+	if req.Kind == "rename" {
+		req.Name = NormalizeName(req.Name)
+	}
 	if err := Validate(req); err != nil {
 		return Result{}, err
 	}

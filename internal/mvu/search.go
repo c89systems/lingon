@@ -10,9 +10,9 @@ import (
 
 // SearchState is the local session search overlay.
 type SearchState struct {
-	Visible     bool
-	Text, Ghost string
-	CandidateID string
+	Visible, Important bool
+	Text, Ghost        string
+	CandidateID        string
 }
 
 // SearchAction updates the local search field independently of connection status.
@@ -34,8 +34,12 @@ func searchCursor(search SearchState, cols, rows int, cursor Cursor) Cursor {
 	return Cursor{Row: rows, Col: col, Visible: true}
 }
 
-func searchText(text string, cols int) string {
-	line := "/ " + text
+func searchText(search SearchState, cols int) string {
+	prefix := "/ "
+	if search.Important {
+		prefix = "i "
+	}
+	line := prefix + search.Text
 	// Keep the insertion point and the tail of long names in view.
 	if width := runewidth.StringWidth(line); width >= cols {
 		line = runewidth.TruncateLeft(line, width-cols+1, "")
@@ -48,7 +52,7 @@ func drawSearch(buf *bytes.Buffer, cols, rows int, search SearchState) {
 		return
 	}
 	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m\x1b[2K", rows)
-	text := searchText(search.Text, cols)
+	text := searchText(search, cols)
 	buf.WriteString(text)
 	remaining := cols - runewidth.StringWidth(text)
 	if remaining > 0 {

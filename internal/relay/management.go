@@ -40,6 +40,9 @@ func (s *HTTPServer) handleSessionManagement(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, sessionmanage.Result{Error: "invalid request"})
 		return
 	}
+	if req.Kind == "rename" {
+		req.Name = sessionmanage.NormalizeName(req.Name)
+	}
 	if err := sessionmanage.Validate(req); err != nil {
 		writeJSON(w, http.StatusBadRequest, sessionmanage.Result{Error: err.Error()})
 		return
@@ -89,6 +92,7 @@ func (h *Hub) manage(ctx context.Context, req sessionmanage.Request) (sessionman
 }
 
 func (s *HTTPServer) handleManagementResult(_ context.Context, host connection, reply *protocolpb.SessionManagement) {
+	reply.Name = sessionmanage.NormalizeName(reply.Name)
 	if !reply.Completed {
 		return
 	}

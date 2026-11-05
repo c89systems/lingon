@@ -77,7 +77,7 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			active, inactive := importantTabColor(viewer, "alpha"), importantTabColor(viewer, "alpha-3")
 			baseFill := viewer.Snapshot().Cells[99].BG
 			viewer.DrainRaw()
-			viewer.Send("\x0ci")
+			viewer.Send("\x0ci\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 				return sameTabColor(importantTabColor(viewer, "alpha"), active) && importantTabColor(viewer, "alpha-3").BG != inactive.BG && viewer.Snapshot().Cells[99].BG != baseFill
 			})
@@ -106,7 +106,7 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			if focused.BG == unfocused.BG {
 				t.Fatal("active unimportant tab uses the inactive background")
 			}
-			viewer.Send("\x1b\x0c\x09") // Cancel search, Ctrl+L Ctrl+I.
+			viewer.Send("\x1b\x0c\x09\r") // Cancel search, Ctrl+L Ctrl+I.
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return sameTabColor(importantTabColor(viewer, "alpha-2"), active) })
 			viewer.Send("\x0c?\t") // Next important tab from alpha-2.
 			searchField(t, viewer, "/ alpha")
@@ -146,7 +146,7 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 				return strings.Contains(s.Row(10), "j hide") && strings.Contains(strings.Join(s.Lines[11:], "\n"), "READY>")
 			})
-			viewer.Send("\x0ci")
+			viewer.Send("\x0ci\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 				return sameTabColor(importantTabColor(viewer, "alpha-3"), active) && importantTabColor(viewer, "alpha").BG != inactive.BG
 			})
@@ -162,12 +162,12 @@ func TestImportantTabToggleAndNavigationPTY(t *testing.T) {
 	for _, useAttach := range []bool{false, true} {
 		t.Run(fmt.Sprint(useAttach), func(t *testing.T) {
 			viewer, settle := overflowSearchTerminal(t, useAttach)
-			viewer.Send("\x0ci\x0c/alpha-4\r")
+			viewer.Send("\x0ci\r\x0c/alpha-4\r")
 			if useAttach {
 				settle()
 			}
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:tab-4") })
-			viewer.Send("\x0ci\x0c/alpha-3\r")
+			viewer.Send("\x0ci\r\x0c/alpha-3\r")
 			if useAttach {
 				settle()
 			}
@@ -190,7 +190,7 @@ func TestImportantTabToggleAndNavigationPTY(t *testing.T) {
 				}
 			}
 			// Unmark alpha, leaving alpha-4 as the sole important tab.
-			viewer.Send("\x0ci\x0cnone-important\r")
+			viewer.Send("\x0ci\r\x0cnone-important\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:one-important") })
 			if !viewer.Screen().Contains("REPLY:tab-4") {
 				t.Fatal("toggle failed to remove alpha from cycling")
@@ -200,12 +200,12 @@ func TestImportantTabToggleAndNavigationPTY(t *testing.T) {
 				return s.Contains("REPLY:still-four") && s.Contains("REPLY:one-important")
 			})
 			// Removing the last mark restores normal cycling automatically.
-			viewer.Send("\x0c\x09\x0cnnormal-next\r")
+			viewer.Send("\x0c\x09\r\x0cnnormal-next\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:normal-next") })
 			if !viewer.Screen().Contains("REPLY:tab-5") {
 				t.Fatal("last toggle did not leave important mode")
 			}
-			viewer.Send("\x0ci\x0cI\x0cnreset-next\r")
+			viewer.Send("\x0ci\r\x0cI\x0cnreset-next\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:reset-next") && s.Contains("REPLY:tab-6") })
 		})
 	}
@@ -215,12 +215,12 @@ func TestImportantSearchScrollsOverflowTabsPTY(t *testing.T) {
 	for _, useAttach := range []bool{false, true} {
 		t.Run(fmt.Sprint(useAttach), func(t *testing.T) {
 			viewer, settle := overflowSearchTerminal(t, useAttach)
-			viewer.Send("\x0ci\x0c/alpha-6\r")
+			viewer.Send("\x0ci\r\x0c/alpha-6\r")
 			if useAttach {
 				settle()
 			}
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:tab-6") })
-			viewer.Send("\x0ci\x0c?\t")
+			viewer.Send("\x0ci\r\x0c?\t")
 			searchField(t, viewer, "/ alpha")
 			viewer.DrainRaw()
 			viewer.Send("\t")
@@ -271,7 +271,7 @@ func TestImportantTabsSurviveRenameAndReconnectPTY(t *testing.T) {
 		}
 	}
 	first := await()
-	viewer.Send("\x0ci\x0cerenamed\r")
+	viewer.Send("\x0ci\r\x0cerenamed\r")
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 		return strings.Contains(s.Row(0), "renamed") && !s.Contains("Rename session")
 	})

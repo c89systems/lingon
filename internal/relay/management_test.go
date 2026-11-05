@@ -57,7 +57,7 @@ func TestManagementRenameImmediatelyAfterHostHello(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, ok := store.GetSession("early-name")
-	if !ok || session.Name != "early rename" {
+	if !ok || session.Name != "early_rename" {
 		t.Fatalf("registration overwrote the runtime name: %+v", session)
 	}
 }
@@ -139,7 +139,7 @@ func TestManagementOwnerAPIAndMetadata(t *testing.T) {
 	go func() { s.Handler().ServeHTTP(w, r); close(done) }()
 	frame := <-host.requests
 	req := frame.GetManagement()
-	if req.RequestId != "request" || req.Kind != "rename" || req.Name != request.Name {
+	if req.RequestId != "request" || req.Kind != "rename" || req.Name != sessionmanage.NormalizeName(request.Name) {
 		t.Fatalf("forwarded %+v", req)
 	}
 	s.handleManagementResult(context.Background(), host, &protocolpb.SessionManagement{Kind: "rename", Name: req.Name, ResultSessionId: "host", Completed: true})
@@ -149,13 +149,13 @@ func TestManagementOwnerAPIAndMetadata(t *testing.T) {
 		t.Fatalf("response %s", w.Body.String())
 	}
 	renamed, _ := store.GetSession("host")
-	if renamed.ID != "host" || renamed.Name != request.Name {
+	if renamed.ID != "host" || renamed.Name != sessionmanage.NormalizeName(request.Name) {
 		t.Fatalf("metadata %+v", renamed)
 	}
 	s.handleManagementResult(context.Background(), host, &protocolpb.SessionManagement{Kind: "rename", Name: "newer name", ResultSessionId: "host", Completed: true})
 	s.handleManagementResult(context.Background(), host, &protocolpb.SessionManagement{CorrelationId: "old-retry", Kind: "rename", Name: req.Name, ResultSessionId: "host", Completed: true})
 	current, _ := store.GetSession("host")
-	if current.Name != "newer name" {
+	if current.Name != "newer_name" {
 		t.Fatal("retry of a completed rename overwrote a newer display name")
 	}
 	hub.mu.Lock()

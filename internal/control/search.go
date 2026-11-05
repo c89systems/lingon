@@ -22,7 +22,7 @@ type SearchSession struct {
 
 // SearchView is an atomic snapshot of the search field and highlighted session.
 type SearchView struct {
-	Active                   bool
+	Active, Important        bool
 	Text, Ghost, CandidateID string
 }
 
@@ -30,6 +30,7 @@ type SearchView struct {
 type SearchResult struct {
 	Consumed, Changed bool
 	SessionID         string
+	SessionIDs        []string
 }
 
 // SearchPrompt edits a prefix and selects sessions without changing the active tab.
@@ -44,6 +45,7 @@ type SearchPrompt struct {
 	escapeTimer  *clock.Timer
 	generation   uint64
 	onChange     func()
+	important    *importantSearch
 }
 
 // Begin starts a fresh search. onChange redraws after a standalone Escape expires;
@@ -53,6 +55,7 @@ func (p *SearchPrompt) Begin(clk clock.Clock, onChange func(), currentID string)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stopEscape()
+	p.important = nil
 	p.editor.Begin("", clk)
 	p.selected, p.completed = "", false
 	p.origin = currentID
@@ -65,6 +68,7 @@ func (p *SearchPrompt) Close() {
 	defer p.mu.Unlock()
 	p.stopEscape()
 	p.editor = RenamePrompt{}
+	p.important = nil
 	p.onChange = nil
 }
 
@@ -86,6 +90,9 @@ func printableName(name string) string {
 
 func (p *SearchPrompt) candidate(sessions []SearchSession) (SearchSession, bool) {
 	text := string(p.editor.text)
+	if p.important != nil {
+		text = importantToken(text)
+	}
 	for _, session := range sessions {
 		if !session.Excluded && session.ID == p.selected && strings.HasPrefix(printableName(session.Name), text) {
 			return session, true
@@ -112,18 +119,39 @@ func (p *SearchPrompt) candidate(sessions []SearchSession) (SearchSession, bool)
 func (p *SearchPrompt) View(sessions []SearchSession) SearchView {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	view := SearchView{Active: p.editor.Active, Text: printableName(string(p.editor.text))}
+	view := SearchView{Active: p.editor.Active, Important: p.important != nil, Text: printableName(string(p.editor.text))}
 	if view.Active {
 		if session, ok := p.candidate(sessions); ok {
 			p.selected = session.ID
-			view.Ghost = strings.TrimPrefix(printableName(session.Name), view.Text)
+			text := view.Text
+			if p.important != nil {
+				text = importantToken(text)
+			}
+			view.Ghost = strings.TrimPrefix(printableName(session.Name), text)
 			view.CandidateID = session.ID
+		} else if p.important != nil && importantToken(string(p.editor.text)) == "" {
+			// Preview the last committed entry while the next token is empty.
+			for offset, entry := range p.important.entries {
+				if offset+len(entry.Name)+1 != len(p.editor.text) {
+					continue
+				}
+				for _, session := range sessions {
+					if !session.Excluded && session.ID == entry.ID && session.Name == entry.Name {
+						view.CandidateID = entry.ID
+						break
+					}
+				}
+			}
 		}
 	}
 	return view
 }
 
 func (p *SearchPrompt) cycle(sessions []SearchSession, direction int) {
+	if p.important != nil {
+		p.cycleImportant(sessions, direction)
+		return
+	}
 	if len(sessions) == 0 {
 		return
 	}
@@ -222,6 +250,9 @@ func (p *SearchPrompt) Feed(b byte, sessions []SearchSession) SearchResult {
 	if b == 0x1b {
 		p.startEscape()
 		return SearchResult{Consumed: true}
+	}
+	if p.important != nil {
+		return p.feedImportant(b, sessions)
 	}
 	result := SearchResult{Consumed: true, Changed: true}
 	if b == '\r' || b == '\n' {

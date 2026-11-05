@@ -61,3 +61,21 @@ func TestStoreListSessionsSortsByName(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreNormalizesDisplayNamesAtEveryBoundary(t *testing.T) {
+	store := NewStore()
+	store.CreateSession(Session{ID: "stable", Username: "owner", Name: "build server"})
+	if session, _ := store.GetSession("stable"); session.Name != "build_server" {
+		t.Fatalf("created %+v", session)
+	}
+	if session, ok := store.SetSessionName("stable", "日本語 build"); !ok || session.Name != "日本語_build" || session.ID != "stable" {
+		t.Fatalf("renamed %+v", session)
+	}
+	loaded, err := LoadStoreFromBytes([]byte(`{"sessions":{"stable":{"id":"stable","name":"old name"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session, _ := loaded.GetSession("stable"); session.Name != "old_name" || session.ID != "stable" {
+		t.Fatalf("loaded %+v", session)
+	}
+}

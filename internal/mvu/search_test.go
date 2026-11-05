@@ -76,3 +76,21 @@ func TestSearchLongNameKeepsTypedSuffixVisible(t *testing.T) {
 		t.Fatalf("typed suffix hidden: %q", line.String())
 	}
 }
+
+func TestImportantPromptCompositionAndClipping(t *testing.T) {
+	for _, cols := range []int{1, 2, 3, 5, 10, 40} {
+		state := NewRuntime().Read()
+		state.Search = SearchState{Visible: true, Important: true, Text: "alpha 日本語", Ghost: "_build"}
+		resolved := Resolve(state, Cursor{}, time.Time{}, ResolveOptions{})
+		snap, err := ComposeViewportSnapshot(BlankSnapshot(cols, 3), cols, 3, resolved, Cursor{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snap.Cursor.Y != 2 || int(snap.Cursor.X) >= cols {
+			t.Fatalf("cols=%d cursor=%v", cols, snap.Cursor)
+		}
+		if cols == 40 && (snap.Runes[2*cols] != 'i' || snap.Runes[2*cols+1] != ' ') {
+			t.Fatal("importance prompt has incorrect prefix")
+		}
+	}
+}

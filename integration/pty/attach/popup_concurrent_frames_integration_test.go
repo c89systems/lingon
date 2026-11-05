@@ -40,7 +40,7 @@ func TestPopupConcurrentHostAndAttachFramesPTY(t *testing.T) {
 	popupScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("14 90") && s.Contains("RESIZE_DONE") })
 	viewer.Send("\x0ceLive tools\r")
 	popupScreen(t, viewer, func(s ptytest.Screen) bool {
-		return strings.Contains(s.Row(15), "Live tools") && !s.Contains("Rename session")
+		return strings.Contains(s.Row(15), "Live_tools") && !s.Contains("Rename session")
 	})
 	viewer.Send("\x0cj\x0cJ")
 	viewer.Send("printf 'PARENT_%s\\n' REMAINS\r")

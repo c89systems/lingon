@@ -14,6 +14,9 @@ import (
 
 // Manage executes an owner-authorized lifecycle operation on a local session.
 func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionmanage.Result {
+	if req.Kind == "rename" {
+		req.Name = sessionmanage.NormalizeName(req.Name)
+	}
 	return r.management.Execute(ctx, req, func() sessionmanage.Result {
 		local := r.localSession(req.SessionID)
 		if local == nil {

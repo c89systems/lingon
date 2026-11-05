@@ -14,21 +14,21 @@ import (
 
 func TestImportantTabIdentityAndImmutableSnapshots(t *testing.T) {
 	rt := NewRuntime()
-	if result := rt.ApplyAction(ImportantTabAction{}); result.Changed || rt.Read().ImportantTabs.Active() {
+	if result := rt.ApplyAction(ImportantTabsAction{}); result.Changed || rt.Read().ImportantTabs.Active() {
 		t.Fatal("empty identity entered important mode")
 	}
-	if result := rt.ApplyAction(ImportantTabAction{SessionID: "a"}); !result.Changed || result.ForceFull {
+	if result := rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}}); !result.Changed || result.ForceFull {
 		t.Fatal("mark did not change the model, or requested a full redraw")
 	}
 	first := rt.Read()
-	if !rt.ApplyAction(ImportantTabAction{SessionID: "a"}).Changed || rt.Read().ImportantTabs.Active() {
+	if !rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}}).Changed || rt.Read().ImportantTabs.Active() {
 		t.Fatal("toggling the last important tab did not leave the mode")
 	}
 	if !first.ImportantTabs.Contains("a") {
 		t.Fatal("toggle mutated an earlier frame snapshot")
 	}
-	rt.ApplyAction(ImportantTabAction{SessionID: "a"})
-	rt.ApplyAction(ImportantTabAction{SessionID: "b"})
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}})
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"b"}})
 	if first.ImportantTabs.Contains("b") || !first.ImportantTabs.Contains("a") {
 		t.Fatal("a later mark mutated an earlier frame snapshot")
 	}
@@ -38,7 +38,7 @@ func TestImportantTabIdentityAndImmutableSnapshots(t *testing.T) {
 	if !state.ImportantTabs.Contains("a") || state.ImportantTabs.Contains("new-b") || !state.ImportantTabs.Active() {
 		t.Fatal("rename, removal, reused name, or theme update changed identity-based marks")
 	}
-	rt.ApplyAction(ImportantTabAction{Reset: true})
+	rt.ApplyAction(ImportantTabsAction{Reset: true})
 	if rt.Read().ImportantTabs.Active() || !state.ImportantTabs.Contains("b") {
 		t.Fatal("reset left marks or mutated a previous snapshot")
 	}
@@ -68,7 +68,7 @@ func TestImportantTabColorsAndSearchComposition(t *testing.T) {
 			rt.ApplyAction(ContextAction{Input: ContextInput{Theme: theme.TUI(name)}})
 			rt.ApplyAction(SessionTabsAction{Input: SessionTabsInput{Sources: []SessionTabSource{{ID: "a", Name: "one"}, {ID: "b", Name: "two"}, {ID: "c", Name: "three"}}, ActiveID: "a"}})
 			baseline := importantTabScreen(t, rt.Read())
-			rt.ApplyAction(ImportantTabAction{SessionID: "a"})
+			rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}})
 			marked := importantTabScreen(t, rt.Read())
 			if marked.Cells[1] != baseline.Cells[1] {
 				t.Fatal("marked tab lost original active theme")
@@ -76,7 +76,7 @@ func TestImportantTabColorsAndSearchComposition(t *testing.T) {
 			if marked.Cells[6].BG == baseline.Cells[6].BG || marked.Cells[79].BG == baseline.Cells[79].BG {
 				t.Fatal("unmarked tab or trailing bar did not dim")
 			}
-			rt.ApplyAction(ImportantTabAction{SessionID: "b"})
+			rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"b"}})
 			both := importantTabScreen(t, rt.Read())
 			if both.Cells[6] != baseline.Cells[6] || both.Cells[79].BG != marked.Cells[79].BG {
 				t.Fatal("second mark did not restore just its original theme")
@@ -95,7 +95,7 @@ func TestImportantTabColorsAndSearchComposition(t *testing.T) {
 			if search.Cells[10].Rune != '[' || search.Cells[16].Rune != ']' || search.Cells[11].BG == baseline.Cells[11].BG {
 				t.Fatal("search brackets, active unmarked style, or tab positions changed")
 			}
-			rt.ApplyAction(ImportantTabAction{Reset: true})
+			rt.ApplyAction(ImportantTabsAction{Reset: true})
 			reset := importantTabScreen(t, rt.Read())
 			for i := range 80 {
 				if reset.Cells[i] != baseline.Cells[i] {
@@ -109,8 +109,8 @@ func TestImportantTabColorsAndSearchComposition(t *testing.T) {
 func TestImportantTabCyclingAndToggle(t *testing.T) {
 	sources := []SessionTabSource{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
 	rt := NewRuntime()
-	rt.ApplyAction(ImportantTabAction{SessionID: "a"})
-	rt.ApplyAction(ImportantTabAction{SessionID: "c"})
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}})
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"c"}})
 	for _, tc := range []struct {
 		current string
 		dir     int
@@ -123,14 +123,14 @@ func TestImportantTabCyclingAndToggle(t *testing.T) {
 			t.Fatalf("%s/%d: got %s, want %s", tc.current, tc.dir, got, tc.want)
 		}
 	}
-	rt.ApplyAction(ImportantTabAction{SessionID: "c"})
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"c"}})
 	if got := rt.Read().ImportantTabs.NextSessionID(sources, "a", 1); got != "a" {
 		t.Fatalf("single mark: got %s", got)
 	}
 	if got := rt.Read().ImportantTabs.NextSessionID(sources[1:], "b", 1); got != "b" {
 		t.Fatalf("absent marked session: got %s", got)
 	}
-	rt.ApplyAction(ImportantTabAction{SessionID: "a"})
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}})
 	if got := rt.Read().ImportantTabs.NextSessionID(sources, "a", 1); got != "b" {
 		t.Fatalf("last toggle failed to restore normal cycling: %s", got)
 	}
@@ -139,7 +139,7 @@ func TestImportantTabCyclingAndToggle(t *testing.T) {
 func TestImportantActiveUnavailableTabKeepsFocusCue(t *testing.T) {
 	for _, muted := range []bool{false, true} {
 		rt := NewRuntime()
-		rt.ApplyAction(ImportantTabAction{SessionID: "a"})
+		rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}})
 		state := rt.Read()
 		state.Tabs = []Tab{{ID: "a", Title: "one"}, {ID: "b", Title: "two", Disabled: !muted, Muted: muted}, {ID: "c", Title: "three"}}
 		state.ActiveTab = 1
@@ -176,7 +176,7 @@ func TestImportantTabChangeUsesExistingFrameCache(t *testing.T) {
 				return out.Rendered.Bytes
 			}
 			render()
-			rt.ApplyAction(ImportantTabAction{SessionID: "a"})
+			rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}})
 			if data := string(render()); data == "" || strings.Contains(data, "\x1b[2J") || strings.Contains(data, "STABLE") {
 				t.Fatalf("importance change cleared or repainted the session: %q", data)
 			}
@@ -186,5 +186,19 @@ func TestImportantTabChangeUsesExistingFrameCache(t *testing.T) {
 				t.Fatalf("unchanged model repainted content: %q", data)
 			}
 		})
+	}
+}
+
+func TestImportantTabsBatchIsImmutableAndDeduplicated(t *testing.T) {
+	rt := NewRuntime()
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a"}})
+	before := rt.Read()
+	rt.ApplyAction(ImportantTabsAction{SessionIDs: []string{"a", "b", "b", "", "c"}})
+	after := rt.Read()
+	if !before.ImportantTabs.Contains("a") || before.ImportantTabs.Contains("b") {
+		t.Fatal("batch mutated old snapshot")
+	}
+	if after.ImportantTabs.Contains("a") || !after.ImportantTabs.Contains("b") || !after.ImportantTabs.Contains("c") || after.ImportantTabs.Contains("") {
+		t.Fatal("incorrect batch toggle")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"pkt.systems/lingon/internal/protocolpb"
+	"pkt.systems/lingon/internal/sessionmanage"
 )
 
 func (p *Publisher) managementLoop(ctx context.Context) {
@@ -36,7 +37,7 @@ func (p *Publisher) SendManagement(reply *protocolpb.SessionManagement) {
 // SetSessionName updates metadata used by subsequent host registrations.
 func (p *Publisher) SetSessionName(name string) {
 	p.mu.Lock()
-	p.opts.SessionName = name
+	p.opts.SessionName = sessionmanage.NormalizeName(name)
 	p.mu.Unlock()
 }
 

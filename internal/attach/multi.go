@@ -2029,7 +2029,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		items := searchSessions()
 		view := search.View(items)
-		state := mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID}
+		state := mvu.SearchState{Visible: view.Active, Important: view.Important, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID}
 		_, client, _, _, _ := activeViewSnapshot()
 		if client != nil {
 			client.renderSearch(state)
@@ -2320,6 +2320,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			client := focusedClient()
 			if search.HandlesInput() {
 				result := search.Feed(b, searchSessions())
+				if len(result.SessionIDs) > 0 {
+					ui.ApplyAction(mvu.ImportantTabsAction{SessionIDs: result.SessionIDs})
+				}
 				if result.Changed {
 					showSearch()
 				}
@@ -2397,12 +2400,17 @@ func (m *MultiClient) Run(ctx context.Context) error {
 						renderActiveCurrent()
 					}
 					return true
-				case control.ActionToggleImportant, control.ActionResetImportant:
+				case control.ActionResetImportant:
+					ui.ApplyAction(mvu.ImportantTabsAction{Reset: true})
+					renderActiveCurrent()
+					return true
+				case control.ActionToggleImportant:
 					mu.Lock()
 					parent := activeID
 					mu.Unlock()
-					ui.ApplyAction(mvu.ImportantTabAction{SessionID: parent, Reset: action == control.ActionResetImportant})
-					renderActiveCurrent()
+					searchImportant.Store(false)
+					search.BeginImportant(m.Clock, showSearch, parent, searchSessions())
+					showSearch()
 					return true
 				case control.ActionSearch, control.ActionSearchImportant:
 					mu.Lock()

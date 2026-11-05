@@ -2416,7 +2416,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		}
 		items := searchSessions()
 		view := search.View(items)
-		c.renderSearch(mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
+		c.renderSearch(mvu.SearchState{Visible: view.Active, Important: view.Important, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
 	}
 	pending := make([]byte, 0, 2048)
 	var scrollState scrollInputState
@@ -2460,6 +2460,9 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		processNormalByte := func(b byte) bool {
 			if search.HandlesInput() {
 				result := search.Feed(b, searchSessions())
+				if len(result.SessionIDs) > 0 {
+					c.applyCompositorAction(mvu.ImportantTabsAction{SessionIDs: result.SessionIDs})
+				}
 				if result.Changed {
 					showSearch()
 				}
@@ -2490,9 +2493,14 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return false
 				}
 				switch action {
-				case control.ActionToggleImportant, control.ActionResetImportant:
-					c.applyCompositorAction(mvu.ImportantTabAction{SessionID: c.SessionID, Reset: action == control.ActionResetImportant})
+				case control.ActionResetImportant:
+					c.applyCompositorAction(mvu.ImportantTabsAction{Reset: true})
 					c.renderCurrent()
+					return true
+				case control.ActionToggleImportant:
+					searchImportant.Store(false)
+					search.BeginImportant(c.clock(), showSearch, c.SessionID, searchSessions())
+					showSearch()
 					return true
 				case control.ActionSearch, control.ActionSearchImportant:
 					searchImportant.Store(action == control.ActionSearchImportant)

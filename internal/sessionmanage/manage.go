@@ -57,14 +57,28 @@ func Validate(req Request) error {
 	return nil
 }
 
+// NormalizeName replaces spacing characters with underscores without hiding
+// invalid UTF-8 or terminal controls, which remain subject to validation.
+func NormalizeName(name string) string {
+	if !utf8.ValidString(name) {
+		return name
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) && !unicode.IsControl(r) {
+			return '_'
+		}
+		return r
+	}, name)
+}
+
 // ValidateName validates a user-visible session name, independent of its socket path.
 func ValidateName(name string) error {
 	if name != strings.TrimSpace(name) || name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 {
 		return fmt.Errorf("session name must contain 1–80 characters without surrounding whitespace")
 	}
 	for _, r := range name {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return fmt.Errorf("session name must not contain control characters")
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) {
+			return fmt.Errorf("session name must not contain whitespace or control characters")
 		}
 	}
 	return nil
