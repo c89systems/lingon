@@ -28,11 +28,24 @@ func TestHelpCopyrightHeaderHostAndAttachPTY(t *testing.T) {
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("READY>") })
 			viewer.Send("\x0ch")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
-				return s.Contains(mvu.HelpTitle()) && s.Contains("Copyright (C) 2026 C89 Systems AB https://c89.systems") && s.Contains("endpoint:")
+				return s.Contains(mvu.HelpTitle()) && s.Contains("Copyright (C) 2026 C89 Systems AB https://c89.systems") && s.Contains("endpoint:") && s.Contains("press q or Q to close help")
 			})
 			screen := viewer.Screen().String()
 			if strings.Contains(screen, "session: ") || strings.Contains(screen, mvu.HelpTitle()+" controls") {
 				t.Fatal("obsolete help header remains:\n" + screen)
+			}
+			pasteEntry := false
+			for _, row := range viewer.Screen().Lines {
+				line := strings.TrimSpace(row)
+				if strings.HasPrefix(line, "Ctrl+L ]  ") {
+					pasteEntry = true
+				}
+				if strings.HasPrefix(line, "Ctrl+L [  ") && strings.Contains(line, "Ctrl+L ]") {
+					t.Fatal("live-terminal paste is incorrectly described as a scrollback command")
+				}
+			}
+			if !pasteEntry {
+				t.Fatal("help has no standalone Ctrl+L ] paste entry")
 			}
 			viewer.Send("qheader-fence\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:header-fence") && !s.Contains(mvu.HelpCopyright) })
