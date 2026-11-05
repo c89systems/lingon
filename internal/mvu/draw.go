@@ -469,7 +469,7 @@ func DrawTabBar(w *bytes.Buffer, in TabBarInput) {
 		dim := (tab.Disabled || tab.Muted) && !focusedUnimportant
 		italic := tab.Disabled || tab.Muted
 		if focusedUnimportant {
-			w.WriteString("\x1b[1;4m")
+			w.WriteString("\x1b[1m")
 		}
 		if dim {
 			w.WriteString("\x1b[2m")

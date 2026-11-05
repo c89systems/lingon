@@ -57,7 +57,7 @@ const (
 	ActionSSHDisconnect
 	// ActionPasteText pastes the process-local scrollback text clipboard.
 	ActionPasteText
-	// ActionToggleImportant toggles the current parent tab importance.
+	// ActionToggleImportant opens the batch importance prompt for the current parent tab.
 	ActionToggleImportant
 	// ActionResetImportant leaves important-tab mode and clears all marks.
 	ActionResetImportant
@@ -126,9 +126,9 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 		case ']':
 			return ActionPasteText, nil
 		case '/':
-			return ActionSearch, nil
-		case '?':
 			return ActionSearchImportant, nil
+		case '?':
+			return ActionSearch, nil
 		case 'i', 0x09: // Ctrl+I (Tab)
 			return ActionToggleImportant, nil
 		case 'I':

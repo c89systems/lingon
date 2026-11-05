@@ -127,7 +127,7 @@ func TestSearchRefreshAndSafeText(t *testing.T) {
 }
 
 func TestSearchAndRestorePrefix(t *testing.T) {
-	for key, want := range map[byte]Action{'/': ActionSearch, '!': ActionToggleRestore} {
+	for key, want := range map[byte]Action{'/': ActionSearchImportant, '?': ActionSearch, '!': ActionToggleRestore} {
 		var p Prefix
 		p.Feed(CtrlL)
 		if action, out := p.Feed(key); action != want || len(out) != 0 {

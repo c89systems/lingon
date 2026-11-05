@@ -88,19 +88,19 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			if mode == "attach" && !sameTabColor(importantTabColor(host, "alpha-3"), inactive) {
 				t.Fatal("marks leaked into the host UI")
 			}
-			viewer.Send("\x0c/alpha-2\r")
+			viewer.Send("\x0c?alpha-2\r")
 			settle()
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 				return s.Contains("REPLY:tab-2") && importantTabColor(viewer, "alpha-2").BG != active.BG
 			})
 			// The local search field fences the complete frame, without advancing
 			// time or depending on more application output to reveal focus.
-			viewer.Send("\x0c/")
+			viewer.Send("\x0c?")
 			searchField(t, viewer, "/")
 			focused := importantTabColor(viewer, "alpha-2")
 			unfocused := importantTabColor(viewer, "alpha-3")
-			focusMode := terminal.ModeBold | terminal.ModeUnderline
-			if focused.Mode&focusMode != focusMode || unfocused.Mode&focusMode != 0 {
+			focusMode := terminal.ModeBold
+			if focused.Mode&focusMode != focusMode || unfocused.Mode&focusMode != 0 || focused.Mode&terminal.ModeUnderline != 0 {
 				t.Fatalf("active unimportant tab has no distinct focus cue: active=%+v inactive=%+v", focused, unfocused)
 			}
 			if focused.BG == unfocused.BG {
@@ -108,7 +108,7 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			}
 			viewer.Send("\x1b\x0c\x09\r") // Cancel search, Ctrl+L Ctrl+I.
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return sameTabColor(importantTabColor(viewer, "alpha-2"), active) })
-			viewer.Send("\x0c?\t") // Next important tab from alpha-2.
+			viewer.Send("\x0c/\t") // Next important tab from alpha-2.
 			searchField(t, viewer, "/ alpha")
 			viewer.Send("\t")
 			searchField(t, viewer, "/ alpha-2")
@@ -117,19 +117,19 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			viewer.Send("\x1bcancelled\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:cancelled") && s.Contains("REPLY:tab-2") })
 			// Ordinary search includes unmarked tabs and preserves ghost completion.
-			viewer.Send("\x0c/alpha-3\r")
+			viewer.Send("\x0c?alpha-3\r")
 			settle()
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:tab-3") })
-			viewer.Send("\x0c?alpha-3\r")
+			viewer.Send("\x0c/alpha-3\r")
 			searchField(t, viewer, "/ alpha-3")
 			if strings.Contains(viewer.Screen().Row(0), "[") {
 				t.Fatal("unmarked exact name became a candidate")
 			}
-			viewer.Send("\x1b\x0c?\t")
+			viewer.Send("\x1b\x0c/\t")
 			searchField(t, viewer, "/ alpha")
-			viewer.Send("\x1b\x0c?\x1b[Z")
+			viewer.Send("\x1b\x0c/\x1b[Z")
 			searchField(t, viewer, "/ alpha-2")
-			viewer.Send("\x1b\x0cI\x0c?\t")
+			viewer.Send("\x1b\x0cI\x0c/\t")
 			searchField(t, viewer, "/ alpha")
 			if !sameTabColor(importantTabColor(viewer, "alpha"), inactive) {
 				t.Fatal("reset did not restore inactive colors")
@@ -150,7 +150,7 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 				return sameTabColor(importantTabColor(viewer, "alpha-3"), active) && importantTabColor(viewer, "alpha").BG != inactive.BG
 			})
-			viewer.Send("\x0cj\x0c?\t")
+			viewer.Send("\x0cj\x0c/\t")
 			searchField(t, viewer, "/ alpha-3")
 			viewer.Send("\x1b\x0cI")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return sameTabColor(importantTabColor(viewer, "alpha"), inactive) })
@@ -162,12 +162,12 @@ func TestImportantTabToggleAndNavigationPTY(t *testing.T) {
 	for _, useAttach := range []bool{false, true} {
 		t.Run(fmt.Sprint(useAttach), func(t *testing.T) {
 			viewer, settle := overflowSearchTerminal(t, useAttach)
-			viewer.Send("\x0ci\r\x0c/alpha-4\r")
+			viewer.Send("\x0ci\r\x0c?alpha-4\r")
 			if useAttach {
 				settle()
 			}
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:tab-4") })
-			viewer.Send("\x0ci\r\x0c/alpha-3\r")
+			viewer.Send("\x0ci\r\x0c?alpha-3\r")
 			if useAttach {
 				settle()
 			}
@@ -215,12 +215,12 @@ func TestImportantSearchScrollsOverflowTabsPTY(t *testing.T) {
 	for _, useAttach := range []bool{false, true} {
 		t.Run(fmt.Sprint(useAttach), func(t *testing.T) {
 			viewer, settle := overflowSearchTerminal(t, useAttach)
-			viewer.Send("\x0ci\r\x0c/alpha-6\r")
+			viewer.Send("\x0ci\r\x0c?alpha-6\r")
 			if useAttach {
 				settle()
 			}
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:tab-6") })
-			viewer.Send("\x0ci\r\x0c?\t")
+			viewer.Send("\x0ci\r\x0c/\t")
 			searchField(t, viewer, "/ alpha")
 			viewer.DrainRaw()
 			viewer.Send("\t")
@@ -275,7 +275,7 @@ func TestImportantTabsSurviveRenameAndReconnectPTY(t *testing.T) {
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 		return strings.Contains(s.Row(0), "renamed") && !s.Contains("Rename session")
 	})
-	viewer.Send("\x0c?ren")
+	viewer.Send("\x0c/ren")
 	searchField(t, viewer, "/ renamed")
 	viewer.Send("\x1bbefore-reconnect\r")
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:before-reconnect") })
@@ -283,15 +283,15 @@ func TestImportantTabsSurviveRenameAndReconnectPTY(t *testing.T) {
 	if next := await(); next == first {
 		t.Fatal("reconnect did not replace the client")
 	}
-	viewer.Send("\x0c?beta\r")
+	viewer.Send("\x0c/beta\r")
 	searchField(t, viewer, "/ beta")
 	if strings.Contains(viewer.Screen().Row(0), "[") {
 		t.Fatal("reconnect lost important-only filtering")
 	}
-	viewer.Send("\x1b\x0c?\t")
+	viewer.Send("\x1b\x0c/\t")
 	searchField(t, viewer, "/ renamed")
 	viewer.Send("\rpost-reconnect\r")
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:post-reconnect") })
-	viewer.Send("\x0cI\x0c?\t")
+	viewer.Send("\x0cI\x0c/\t")
 	searchField(t, viewer, "/ beta")
 }

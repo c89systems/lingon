@@ -47,7 +47,8 @@ After `Ctrl+l`, `Ctrl+j` is an alias for `j` (show/hide popup), `Ctrl+n` for `n`
 (next tab), `Ctrl+p` for `p` (previous tab), `Ctrl+t` for `t` (next theme), and
 `Ctrl+h` for `h` (help).
 These control keys pass through normally without the prefix. Session search
-uses `Ctrl+l /` for all tabs and `Ctrl+l ?` for important tabs.
+uses `Ctrl+l /` for important tabs in imode (all tabs otherwise), and
+`Ctrl+l ?` for all tabs at all times.
 
 Popup programs start with the content box's width and height, excluding the bar.
 Creation can supply initial columns and rows; without them, a new session inherits
@@ -105,22 +106,26 @@ Important-tab marks are UI-local, keyed by immutable session ID and shared by
 the local and remote tabs displayed in that UI. `Ctrl+l i` (also
 `Ctrl+l Ctrl+i`) opens a batch prompt prefilled with the parent tab and a trailing
 space. Enter toggles all listed tabs once without switching; Escape or Ctrl+C
-cancels. Space separates names. Tab completes and appends a name; empty Tab
-selects the next unlisted tab, and Shift+Tab selects backwards. Ctrl+W deletes a
-whole space-separated name, preserving punctuation within remaining names.
+cancels. Tab completes the current entry without adding a space, then cycles
+through tabs in that same entry; Shift+Tab cycles backwards. Each empty entry
+starts at the first tab with Tab, or the last with Shift+Tab. Space accepts the
+current completion and begins another entry. Enter includes a completed final
+entry even without a trailing space. Ctrl+W deletes a whole space-separated
+name, preserving punctuation within remaining names.
 Typed names must resolve uniquely (exact names take precedence over prefixes);
 ambiguous or missing entries keep the prompt open without partially applying
-marks. Initial and completed entries retain session IDs, including duplicate
+marks. Initial, Tab-completed and Space-accepted entries retain session IDs,
+including duplicate
 display names. `Ctrl+l I` resets all marks outside the prompt. Removing
 the last mark leaves the mode. Unmarked tabs and the bar use the selected theme's
 darker terminal palette, preserving
 the active-tab style and search brackets. The active unmarked tab uses a brighter
-background, stronger text contrast, bold and underline. `Ctrl+l n/p` and their
+background, stronger text contrast and bold text. `Ctrl+l n/p` and their
 control-key aliases cycle only marked IDs while important mode is active.
-`Ctrl+l ?` restricts suggestions and Tab/Shift+Tab cycling to marked IDs,
+`Ctrl+l /` restricts suggestions and Tab/Shift+Tab cycling to marked IDs,
 retaining the current tab's place in the
 full tab order as the cycling origin. It searches all tabs when the mode is
-inactive; `/` always searches all tabs. Rename and reconnect do not alter marks.
+inactive; `?` always searches all tabs. Rename and reconnect do not alter marks.
 Removed IDs do not transfer their marks to a new session with the same name.
 Marks can be toggled individually or cleared with reset; exiting the UI discards
 them. Neither the backend nor

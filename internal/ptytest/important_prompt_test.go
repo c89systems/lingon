@@ -29,7 +29,7 @@ func TestImportantPromptBatchHostAndAttachPTY(t *testing.T) {
 			}
 			viewer.Send("\x17alpha-3\raccepted\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:accepted") && s.Contains("REPLY:tab-1") })
-			viewer.Send("\x0c?alpha-4\r")
+			viewer.Send("\x0c/alpha-4\r")
 			searchField(t, viewer, "/ alpha-4") // Unmarked tab cannot be opened here.
 			viewer.Send("\x1b")
 			for i, tab := range []int{2, 3, 1} {
@@ -42,8 +42,12 @@ func TestImportantPromptBatchHostAndAttachPTY(t *testing.T) {
 					t.Fatalf("batch selected wrong next tab:\n%s", viewer.Screen().String())
 				}
 			}
-			// Completing names appends them to a list; the same batch removes all marks.
+			// Tab cycles within an entry; Space accepts it before the next entry.
 			viewer.Send("\x0c\x09\t\t")
+			searchField(t, viewer, "i alpha alpha-2")
+			viewer.Send("\t")
+			searchField(t, viewer, "i alpha alpha-3")
+			viewer.Send("\x1b[Z a\t\t\t")
 			searchField(t, viewer, "i alpha alpha-2 alpha-3")
 			viewer.Send("\rremoved\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
@@ -93,10 +97,74 @@ func TestImportantPromptSingleAttachPTY(t *testing.T) {
 	searchField(t, viewer, "/")
 	viewer.Send("\x1b\x0ci")
 	searchField(t, viewer, "i single-important")
-	viewer.Send("\x17bad.name\x17single-important\r\x0c?\t")
+	viewer.Send("\x17bad.name\x17single-important\r\x0c/\t")
 	searchField(t, viewer, "/ single-important")
-	viewer.Send("\x1b\x0ci\r\x0c?\t")
+	viewer.Send("\x1b\x0ci\r\x0c/\t")
 	searchField(t, viewer, "/ single-important")
 	viewer.Send("\x1bsingle-input\r")
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:single-input") })
+}
+
+func TestImportantPromptTabCyclesWithinEntryHostAndAttachPTY(t *testing.T) {
+	for _, useAttach := range []bool{false, true} {
+		t.Run(fmt.Sprint(useAttach), func(t *testing.T) {
+			viewer, settle := overflowSearchTerminal(t, useAttach)
+			viewer.Send("\x0c/alpha-3\r")
+			settle()
+			viewer.Send("origin-entry\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:origin-entry") && s.Contains("REPLY:tab-3") })
+			viewer.Send("\x0ci")
+			searchField(t, viewer, "i alpha-3")
+			viewer.Send("\t")
+			searchField(t, viewer, "i alpha-3 alpha") // First tab, independent of current tab.
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
+				return strings.TrimSpace(s.Row(s.Rows-1)) == "i alpha-3 alpha" && viewer.Cursor().Col == len("i alpha-3 alpha")+1
+			})
+			viewer.Send("\t")
+			searchField(t, viewer, "i alpha-3 alpha-2")
+			viewer.Send("\x1b[Z")
+			searchField(t, viewer, "i alpha-3 alpha")
+			viewer.Send("\t ")
+			searchField(t, viewer, "i alpha-3 alpha-2")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
+				return strings.TrimSpace(s.Row(s.Rows-1)) == "i alpha-3 alpha-2" && viewer.Cursor().Col == len("i alpha-3 alpha-2 ")+1
+			})
+			viewer.Send("alp")
+			searchField(t, viewer, "i alpha-3 alpha-2 alpha") // Entered prefix plus gray ghost.
+			viewer.Send("\t")
+			searchField(t, viewer, "i alpha-3 alpha-2 alpha")
+			viewer.Send("\rselected-entry\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:selected-entry") && s.Contains("REPLY:tab-3") })
+			viewer.Send("\x0c/alpha-4\r")
+			searchField(t, viewer, "/ alpha-4") // Merely previewed tabs were not marked.
+			viewer.Send("\x1b\x0cnnext-entry\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:next-entry") && s.Contains("REPLY:tab-1") })
+		})
+	}
+}
+
+func TestImportantSearchScopeBindingsHostAndAttachPTY(t *testing.T) {
+	for _, useAttach := range []bool{false, true} {
+		t.Run(fmt.Sprint(useAttach), func(t *testing.T) {
+			viewer, settle := overflowSearchTerminal(t, useAttach)
+			viewer.Send("\x0ci\r\x0c/alpha-2\r")
+			searchField(t, viewer, "/ alpha-2") // Slash cannot open an unmarked tab in imode.
+			viewer.Send("\x1b\x0c?alpha-2\r")
+			if useAttach {
+				settle()
+			}
+			viewer.Send("all-scope\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:all-scope") && s.Contains("REPLY:tab-2") })
+			viewer.Send("\x0c/\t")
+			searchField(t, viewer, "/ alpha")
+			viewer.Send("\rmarked-scope\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:marked-scope") && s.Contains("REPLY:tab-1") })
+			viewer.Send("\x0cI\x0c/alpha-3\r")
+			if useAttach {
+				settle()
+			}
+			viewer.Send("reset-scope\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:reset-scope") && s.Contains("REPLY:tab-3") })
+		})
+	}
 }

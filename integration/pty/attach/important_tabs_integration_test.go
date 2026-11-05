@@ -64,36 +64,36 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 				return view.Snapshot().Cells[x]
 			}
 			wait(viewer, func(s ptytest.Screen) bool { return s.Contains("PROMPT>") })
-			viewer.Send("printf 'FIRST_%s\\n' READY\r\x0c/")
+			viewer.Send("printf 'FIRST_%s\\n' READY\r\x0c?")
 			wait(viewer, func(s ptytest.Screen) bool {
 				return s.Contains("FIRST_READY") && strings.TrimSpace(s.Row(19)) == "/" && strings.Contains(s.Row(0), "important-b")
 			})
 			active := color(viewer, "important-a")
 			inactive := color(viewer, "important-b")
 			fill := viewer.Snapshot().Cells[99].BG
-			viewer.Send("\x1b\x0ci\r\x0c/")
+			viewer.Send("\x1b\x0ci\r\x0c?")
 			wait(viewer, func(s ptytest.Screen) bool {
 				return color(viewer, "important-a").BG == active.BG && color(viewer, "important-b").BG != inactive.BG && viewer.Snapshot().Cells[99].BG != fill
 			})
-			viewer.Send("\x1b\x0c?important-b\r")
+			viewer.Send("\x1b\x0c/important-b\r")
 			field("/ important-b")
 			if strings.Contains(viewer.Screen().Row(0), "[") {
 				t.Fatal("important-only search selected an unmarked tab")
 			}
-			viewer.Send("\x1b\x0c/important-b\rprintf 'SECOND_%s\\n' READY\r")
+			viewer.Send("\x1b\x0c?important-b\rprintf 'SECOND_%s\\n' READY\r")
 			wait(viewer, func(s ptytest.Screen) bool { return s.Contains("SECOND_READY") && !s.Contains("FIRST_READY") })
 			viewer.Send("\x0cj")
 			wait(viewer, func(s ptytest.Screen) bool {
 				return strings.Contains(s.Row(10), "j hide") && strings.Contains(strings.Join(s.Lines[11:], "\n"), "PROMPT>")
 			})
-			viewer.Send("printf 'POPUP_%s\\n' READY\r\x0c\x09\r\x0c/")
+			viewer.Send("printf 'POPUP_%s\\n' READY\r\x0c\x09\r\x0c?")
 			wait(viewer, func(s ptytest.Screen) bool {
 				return s.Contains("POPUP_READY") && strings.TrimSpace(s.Row(19)) == "/" && color(viewer, "important-b").BG == active.BG
 			})
 			if viewer.Snapshot().Cells[99].BG == fill {
 				t.Fatal("marking every tab left important mode")
 			}
-			viewer.Send("\x1b\x0cj\x0c?\t")
+			viewer.Send("\x1b\x0cj\x0c/\t")
 			field("/ important-a")
 			viewer.Send("\x1b[Z")
 			field("/ important-b")
@@ -101,11 +101,11 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			other := start("important-b")
 			t.Cleanup(other.Cancel)
 			wait(other, func(s ptytest.Screen) bool { return s.Contains("SECOND_READY") })
-			other.Send("\x0c/")
+			other.Send("\x0c?")
 			wait(other, func(s ptytest.Screen) bool {
 				return strings.TrimSpace(s.Row(19)) == "/" && other.Snapshot().Cells[99].BG == fill
 			})
-			viewer.Send("\x1b\x0cI\x0c?\t")
+			viewer.Send("\x1b\x0cI\x0c/\t")
 			field("/ important-a")
 			if color(viewer, "important-a").BG != inactive.BG || viewer.Snapshot().Cells[99].BG != fill {
 				t.Fatal("reset did not restore the original tab theme")
@@ -118,7 +118,7 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			field("i important-b")
 			viewer.Send("\t")
 			field("i important-b important-a")
-			viewer.Send("\r\x0c/")
+			viewer.Send("\r\x0c?")
 			field("/")
 			if viewer.Snapshot().Cells[99].BG == fill {
 				t.Fatal("batch completion did not mark both tabs")
@@ -127,7 +127,7 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			field("i important-b")
 			viewer.Send("\x17important-a important-b")
 			field("i important-a important-b")
-			viewer.Send("\r\x0c/")
+			viewer.Send("\r\x0c?")
 			field("/")
 			if viewer.Snapshot().Cells[99].BG != fill {
 				t.Fatal("typed batch did not clear both marks")

@@ -19,10 +19,10 @@ func TestImportantPromptBatchEditing(t *testing.T) {
 		{"beta.build 日本\r", "alpha.prod beta.build 日本", []string{"a", "b", "d"}, false},
 		{"be\r", "alpha.prod be", nil, true},
 		{"beta.build missing\r", "alpha.prod beta.build missing", nil, true},
-		{"beta.build \t\r", "alpha.prod beta.build beta.test ", []string{"a", "b", "c"}, false},
-		{"\t\t\r", "alpha.prod beta.build beta.test ", []string{"a", "b", "c"}, false},
-		{"be\t日本\t\r", "alpha.prod beta.build 日本語_🦊 ", []string{"a", "b", "d"}, false},
-		{"\x1b[Z\r", "alpha.prod 日本語_🦊 ", []string{"a", "d"}, false},
+		{"beta.build \t\r", "alpha.prod beta.build alpha.prod", []string{"a", "b"}, false},
+		{"\t\t\r", "alpha.prod beta.build", []string{"a", "b"}, false},
+		{"be\t 日本\t\r", "alpha.prod beta.build 日本語_🦊", []string{"a", "b", "d"}, false},
+		{"\x1b[Z\r", "alpha.prod 日本語_🦊", []string{"a", "d"}, false},
 		{"beta.build\x17", "alpha.prod ", nil, true},
 		{"beta.build  \x17", "alpha.prod ", nil, true},
 		{"beta.build\x17\x17", "", nil, true},
@@ -57,10 +57,10 @@ func TestImportantPromptIdentityAndAmbiguity(t *testing.T) {
 		ids    []string
 		active bool
 	}{
-		{"\r", []string{"b"}, false},            // Initial current identity survives duplicate names.
-		{"\x17same\r", nil, true},               // Manually typed duplicate exact names stay ambiguous.
-		{"same\t\r", []string{"b", "a"}, false}, // Tab pins the chosen duplicate.
-		{"\t\r", []string{"b", "c"}, false},
+		{"\r", []string{"b"}, false},           // Initial current identity survives duplicate names.
+		{"\x17same\r", nil, true},              // Manually typed duplicate exact names stay ambiguous.
+		{"sam\t\r", []string{"b", "a"}, false}, // Tab pins the chosen duplicate.
+		{"\t\r", []string{"b", "a"}, false},
 		{"sam\r", nil, true},
 	} {
 		t.Run(tc.keys, func(t *testing.T) {
@@ -84,6 +84,7 @@ func TestImportantPromptIdentityAndAmbiguity(t *testing.T) {
 		t.Fatal("missing pinned session retargeted by name")
 	}
 	p.BeginImportant(clock.NewMock(), nil, "a", sessions)
+	p.Feed('\t', sessions)
 	p.Feed('\t', sessions)
 	sessions[1].Name = "renamed"
 	if result := p.Feed('\r', sessions); result.SessionIDs != nil {
@@ -118,5 +119,48 @@ func TestImportantPromptGhostEscapeAndModeReset(t *testing.T) {
 	p.Feed('\t', sessions)
 	if p.Feed('\r', sessions).SessionID != "b" {
 		t.Fatal("ordinary search behavior changed")
+	}
+}
+
+func TestImportantPromptTabCyclesUntilSpaceCommits(t *testing.T) {
+	sessions := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "beta"}, {ID: "c", Name: "current"}, {ID: "d", Name: "delta"}}
+	var p SearchPrompt
+	p.BeginImportant(clock.NewMock(), nil, "c", sessions)
+	defer p.Close()
+	check := func(text, ghost, id string) {
+		t.Helper()
+		got := p.View(sessions)
+		if got.Text != text || got.Ghost != ghost || got.CandidateID != id || !got.Active {
+			t.Fatalf("view=%+v want text=%q ghost=%q candidate=%q", got, text, ghost, id)
+		}
+	}
+	check("current ", "", "c")
+	for _, tc := range []struct {
+		key      byte
+		name, id string
+	}{{'\t', "alpha", "a"}, {'\t', "beta", "b"}, {'\t', "current", "c"}, {'\t', "delta", "d"}, {'\t', "alpha", "a"}} {
+		p.Feed(tc.key, sessions)
+		check("current "+tc.name, "", tc.id)
+	}
+	for _, b := range []byte("\x1b[Z") {
+		p.Feed(b, sessions)
+	}
+	check("current delta", "", "d")
+	p.Feed(' ', sessions)
+	check("current delta ", "", "d")
+	p.Feed('b', sessions)
+	check("current delta b", "eta", "b")
+	p.Feed('\t', sessions)
+	check("current delta beta", "", "b")
+	// Space also accepts the ghost of a typed prefix, preserving that exact ID.
+	p.Feed(0x17, sessions)
+	p.Feed('b', sessions)
+	p.Feed(' ', sessions)
+	check("current delta beta ", "", "b")
+	p.Feed('\t', sessions)
+	check("current delta beta alpha", "", "a")
+	result := p.Feed('\r', sessions)
+	if !reflect.DeepEqual(result.SessionIDs, []string{"c", "d", "b", "a"}) || p.View(sessions).Active {
+		t.Fatalf("accepted %+v", result)
 	}
 }

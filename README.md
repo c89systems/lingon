@@ -359,7 +359,8 @@ clipboard until Space or Enter commits a replacement.
 #### Find a session
 
 In the interactive host and `lingon attach`, press `Ctrl+l /` to open a search
-field at the bottom left. Type a case-sensitive session-name prefix; the rest
+field at the bottom left. In important-tab mode, `/` searches only marked tabs;
+`Ctrl+l ?` always searches all tabs. Type a case-sensitive session-name prefix; the rest
 of the suggested name appears in gray. Enter accepts the suggestion and opens
 that exact session. Tab first fills the suggestion; further Tab presses cycle
 through session names in tab order, wrapping at the end. Tab on an empty field
@@ -386,19 +387,22 @@ the window.
 In the interactive host or `lingon attach`, `Ctrl+l i` opens the `i` prompt with
 the current tab's name and a trailing space. `Ctrl+l Ctrl+i` is an alias (the second
 key is also Tab). Enter immediately toggles the current tab. To toggle several
-tabs together, type space-separated names or prefixes; Tab completes and appends
-a name followed by a space. Tab on an empty entry appends the next unlisted tab
-relative to the last completion, with Shift+Tab going backwards. Ctrl+W deletes
+tabs together, type a name prefix to see its gray completion. Tab fills that
+completion without adding a space; further Tab presses cycle through all tabs
+within the same entry. Shift+Tab cycles backwards. On each empty entry, Tab
+starts with the first tab in the list, or the last with Shift+Tab. Space accepts
+the current suggestion and starts the next entry. Enter applies the entire list,
+including a completed final entry without a trailing space. Ctrl+W deletes
 one whole space-separated name, including dots, hyphens and underscores. Escape
-or Ctrl+C cancels without changing marks. Enter applies each selected tab once,
-without switching tabs. Missing or ambiguous typed names keep the prompt open
-and apply nothing; Tab-completed entries retain their session identity even when
-names are duplicated.
+or Ctrl+C cancels without changing marks. Enter toggles each selected tab once
+without switching tabs. Missing or ambiguous unresolved names keep the prompt
+open and apply nothing; entries accepted with Tab or Space retain their session
+identity even when names are duplicated.
 
 The first mark enters important-tab mode: the bar and unmarked tabs use a darker
 variant of the selected theme, while marked tabs keep their normal colors. The active
-non-important tab has a brighter background and readable text, with bold and
-underline to make focus clear. Inactive non-important tabs stay dark. Marking an
+non-important tab has a brighter background and readable text, with bold text
+to make focus clear. Inactive non-important tabs stay dark. Marking an
 already important tab removes its mark; removing the last mark leaves the mode.
 `Ctrl+l I` clears every mark and restores the normal bar.
 
@@ -408,10 +412,10 @@ next or previous marked tab in the full tab order. A single remaining important
 tab stays selected; if no marked tabs are present, cycling keeps the current
 session. Resetting the mode restores ordinary cycling through all tabs.
 
-`Ctrl+l ?` opens the same search field as `/`, limited to important tabs while
-this mode is active. Tab and Shift+Tab cycle through marked tabs relative to the
-current tab, including when the current tab is unmarked. `Ctrl+l /` always
-searches all tabs. Outside important-tab mode, `?` is an alias for `/`.
+`Ctrl+l /` limits search to important tabs while this mode is active. Tab and
+Shift+Tab cycle through marked tabs relative to the current tab, including when
+the current tab is unmarked. `Ctrl+l ?` always searches all tabs. Outside
+important-tab mode, both commands search all tabs.
 
 Marks belong to this UI process and session identities: they survive tab switches,
 renames, theme changes and reconnects, without affecting another host/attach UI.

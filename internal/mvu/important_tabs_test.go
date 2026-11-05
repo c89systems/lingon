@@ -84,7 +84,7 @@ func TestImportantTabColorsAndSearchComposition(t *testing.T) {
 			state := rt.Read()
 			state.ActiveTab = 2
 			focus := importantTabScreen(t, state)
-			if focus.Cells[11].Mode&(terminal.ModeBold|terminal.ModeUnderline) != terminal.ModeBold|terminal.ModeUnderline {
+			if focus.Cells[11].Mode&terminal.ModeBold == 0 || focus.Cells[11].Mode&terminal.ModeUnderline != 0 {
 				t.Fatal("active unimportant tab has no focus cue")
 			}
 			if focus.Cells[1].Mode&(terminal.ModeBold|terminal.ModeUnderline) != 0 {
@@ -144,7 +144,7 @@ func TestImportantActiveUnavailableTabKeepsFocusCue(t *testing.T) {
 		state.Tabs = []Tab{{ID: "a", Title: "one"}, {ID: "b", Title: "two", Disabled: !muted, Muted: muted}, {ID: "c", Title: "three"}}
 		state.ActiveTab = 1
 		focused := importantTabScreen(t, state).Cells[6]
-		if focused.Mode&(terminal.ModeBold|terminal.ModeUnderline|terminal.ModeItalic) != terminal.ModeBold|terminal.ModeUnderline|terminal.ModeItalic || focused.Mode&terminal.ModeFaint != 0 {
+		if focused.Mode&(terminal.ModeBold|terminal.ModeItalic) != terminal.ModeBold|terminal.ModeItalic || focused.Mode&terminal.ModeUnderline != 0 || focused.Mode&terminal.ModeFaint != 0 {
 			t.Fatalf("unavailable active focus styling: %+v", focused)
 		}
 	}

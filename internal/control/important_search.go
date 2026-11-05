@@ -7,8 +7,9 @@ import (
 	"pkt.systems/lingon/internal/clock"
 )
 
-// importantSearch retains identities only for the prefilled and Tab-completed
-// tokens. Manually entered tokens must resolve unambiguously when accepted.
+// importantSearch retains identities for prefilled, Tab-completed and explicitly
+// Space-accepted tokens. Other manually entered tokens must resolve
+// unambiguously when accepted.
 // All access is protected by the enclosing SearchPrompt's mutex.
 type importantSearch struct {
 	entries map[int]SearchSession
@@ -39,49 +40,43 @@ func importantToken(text string) string {
 }
 
 func (p *SearchPrompt) cycleImportant(sessions []SearchSession, direction int) {
-	text := string(p.editor.text)
-	start := len(text) - len(importantToken(text))
+	token := importantToken(string(p.editor.text))
 	candidate, found := p.candidate(sessions)
-	if !found && start == len(text) && len(sessions) != 0 {
-		origin := p.origin
-		used := make(map[string]bool)
-		for offset, entry := range p.important.entries {
-			used[entry.ID] = true
-			if offset+len(entry.Name)+1 == start {
-				origin = entry.ID
-			}
-		}
-		if ids, ok := p.acceptImportant(sessions); ok && len(ids) > 0 {
-			for _, id := range ids {
-				used[id] = true
-			}
-			origin = ids[len(ids)-1]
-		}
-		index := -1
-		if direction < 0 {
-			index = 0
-		}
+	if found && !p.completed && candidate.Name != token {
+		p.completeImportant(candidate)
+		return
+	}
+	// Each empty entry starts at the list's first/last eligible tab. Completed
+	// entries cycle in place; only an explicit Space starts another entry.
+	index := -1
+	if direction < 0 {
+		index = 0
+	}
+	if found {
 		for i, session := range sessions {
-			if session.ID == origin {
+			if session.ID == candidate.ID {
 				index = i
 				break
 			}
 		}
-		for step := 1; step <= len(sessions); step++ {
-			session := sessions[(index+direction*step+2*len(sessions))%len(sessions)]
-			if !session.Excluded && !used[session.ID] {
-				candidate, found = session, true
-				break
-			}
-		}
-	}
-	if !found {
+	} else if token != "" {
 		return
 	}
-	p.editor.text = []byte(text[:start] + candidate.Name + " ")
+	for step := 1; step <= len(sessions); step++ {
+		session := sessions[(index+direction*step+2*len(sessions))%len(sessions)]
+		if !session.Excluded {
+			p.completeImportant(session)
+			return
+		}
+	}
+}
+
+func (p *SearchPrompt) completeImportant(candidate SearchSession) {
+	text := string(p.editor.text)
+	start := len(text) - len(importantToken(text))
+	p.editor.text = []byte(text[:start] + candidate.Name)
 	p.important.entries[start] = candidate
-	p.origin = candidate.ID
-	p.selected = ""
+	p.selected, p.completed = candidate.ID, true
 }
 
 func (p *SearchPrompt) acceptImportant(sessions []SearchSession) ([]string, bool) {
@@ -165,7 +160,12 @@ func (p *SearchPrompt) feedImportant(b byte, sessions []SearchSession) SearchRes
 		p.cycleImportant(sessions, 1)
 		return result
 	}
-	p.selected = ""
+	if b == ' ' && importantToken(string(p.editor.text)) != "" {
+		if candidate, ok := p.candidate(sessions); ok {
+			p.completeImportant(candidate)
+		}
+	}
+	p.selected, p.completed = "", false
 	if b == 0x17 { // Ctrl+W: separators are spaces, never punctuation.
 		text := strings.TrimRight(string(p.editor.text), " ")
 		p.editor.text = []byte(text[:strings.LastIndexByte(text, ' ')+1])
