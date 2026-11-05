@@ -46,21 +46,23 @@ func (p *SearchPrompt) cycleImportant(sessions []SearchSession, direction int) {
 		p.completeImportant(candidate)
 		return
 	}
-	// Each empty entry starts at the list's first/last eligible tab. Completed
-	// entries cycle in place; only an explicit Space starts another entry.
+	// Empty entries cycle from the active tab, just like ordinary search.
+	// Completed entries cycle in place; only Space starts another entry.
 	index := -1
 	if direction < 0 {
 		index = 0
 	}
+	origin := p.origin
 	if found {
-		for i, session := range sessions {
-			if session.ID == candidate.ID {
-				index = i
-				break
-			}
-		}
+		origin = candidate.ID
 	} else if token != "" {
 		return
+	}
+	for i, session := range sessions {
+		if session.ID == origin {
+			index = i
+			break
+		}
 	}
 	for step := 1; step <= len(sessions); step++ {
 		session := sessions[(index+direction*step+2*len(sessions))%len(sessions)]

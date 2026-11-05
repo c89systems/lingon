@@ -108,8 +108,9 @@ the local and remote tabs displayed in that UI. `Ctrl+l i` (also
 space. Enter toggles all listed tabs once without switching; Escape or Ctrl+C
 cancels. Tab completes the current entry without adding a space, then cycles
 through tabs in that same entry; Shift+Tab cycles backwards. Each empty entry
-starts at the first tab with Tab, or the last with Shift+Tab. Space accepts the
-current completion and begins another entry. Enter includes a completed final
+starts after the active tab with Tab, or before it with Shift+Tab, wrapping at
+the ends. A typed prefix takes precedence over that starting position. Space
+accepts the current completion and begins another entry. Enter includes a completed final
 entry even without a trailing space. Ctrl+W deletes a whole space-separated
 name, preserving punctuation within remaining names.
 Typed names must resolve uniquely (exact names take precedence over prefixes);

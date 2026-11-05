@@ -43,7 +43,7 @@ func TestImportantPromptBatchHostAndAttachPTY(t *testing.T) {
 				}
 			}
 			// Tab cycles within an entry; Space accepts it before the next entry.
-			viewer.Send("\x0c\x09\t\t")
+			viewer.Send("\x0c\x09\t")
 			searchField(t, viewer, "i alpha alpha-2")
 			viewer.Send("\t")
 			searchField(t, viewer, "i alpha alpha-3")
@@ -116,29 +116,29 @@ func TestImportantPromptTabCyclesWithinEntryHostAndAttachPTY(t *testing.T) {
 			viewer.Send("\x0ci")
 			searchField(t, viewer, "i alpha-3")
 			viewer.Send("\t")
-			searchField(t, viewer, "i alpha-3 alpha") // First tab, independent of current tab.
+			searchField(t, viewer, "i alpha-3 alpha-4") // Next tab after the active tab.
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
-				return strings.TrimSpace(s.Row(s.Rows-1)) == "i alpha-3 alpha" && viewer.Cursor().Col == len("i alpha-3 alpha")+1
+				return strings.TrimSpace(s.Row(s.Rows-1)) == "i alpha-3 alpha-4" && viewer.Cursor().Col == len("i alpha-3 alpha-4")+1
 			})
 			viewer.Send("\t")
-			searchField(t, viewer, "i alpha-3 alpha-2")
+			searchField(t, viewer, "i alpha-3 alpha-5")
 			viewer.Send("\x1b[Z")
-			searchField(t, viewer, "i alpha-3 alpha")
+			searchField(t, viewer, "i alpha-3 alpha-4")
 			viewer.Send("\t ")
-			searchField(t, viewer, "i alpha-3 alpha-2")
+			searchField(t, viewer, "i alpha-3 alpha-5")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
-				return strings.TrimSpace(s.Row(s.Rows-1)) == "i alpha-3 alpha-2" && viewer.Cursor().Col == len("i alpha-3 alpha-2 ")+1
+				return strings.TrimSpace(s.Row(s.Rows-1)) == "i alpha-3 alpha-5" && viewer.Cursor().Col == len("i alpha-3 alpha-5 ")+1
 			})
 			viewer.Send("alp")
-			searchField(t, viewer, "i alpha-3 alpha-2 alpha") // Entered prefix plus gray ghost.
+			searchField(t, viewer, "i alpha-3 alpha-5 alpha") // Entered prefix plus gray ghost.
 			viewer.Send("\t")
-			searchField(t, viewer, "i alpha-3 alpha-2 alpha")
+			searchField(t, viewer, "i alpha-3 alpha-5 alpha")
 			viewer.Send("\rselected-entry\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:selected-entry") && s.Contains("REPLY:tab-3") })
 			viewer.Send("\x0c/alpha-4\r")
 			searchField(t, viewer, "/ alpha-4") // Merely previewed tabs were not marked.
 			viewer.Send("\x1b\x0cnnext-entry\r")
-			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:next-entry") && s.Contains("REPLY:tab-1") })
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:next-entry") && s.Contains("REPLY:tab-5") })
 		})
 	}
 }

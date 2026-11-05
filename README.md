@@ -390,7 +390,8 @@ key is also Tab). Enter immediately toggles the current tab. To toggle several
 tabs together, type a name prefix to see its gray completion. Tab fills that
 completion without adding a space; further Tab presses cycle through all tabs
 within the same entry. Shift+Tab cycles backwards. On each empty entry, Tab
-starts with the first tab in the list, or the last with Shift+Tab. Space accepts
+starts after the active tab, or before it with Shift+Tab, wrapping at either end.
+Typing a prefix instead starts completion from that prefix. Space accepts
 the current suggestion and starts the next entry. Enter applies the entire list,
 including a completed final entry without a trailing space. Ctrl+W deletes
 one whole space-separated name, including dots, hyphens and underscores. Escape
