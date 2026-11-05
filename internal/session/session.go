@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -535,12 +536,15 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 		}
 		var rename control.RenamePrompt
 		var search control.SearchPrompt
+		var searchImportant atomic.Bool
 		defer search.Close()
 		searchSessions := func() []control.SearchSession {
 			current := r.combinedSessions()
+			important := r.runtime().Read().ImportantTabs
+			filtered := searchImportant.Load() && important.Active()
 			items := make([]control.SearchSession, 0, len(current))
 			for _, s := range current {
-				items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name)})
+				items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name), Excluded: filtered && !important.Contains(s.ID)})
 			}
 			return items
 		}
@@ -718,8 +722,14 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 					}
 					r.setTabSuppressed(activeID, false)
 					switch action {
-					case control.ActionSearch:
+					case control.ActionMarkImportant, control.ActionResetImportant:
 						parent, _ := r.activeSession()
+						r.runtime().ApplyAction(mvu.ImportantTabAction{SessionID: parent, Reset: action == control.ActionResetImportant})
+						r.forceRedraw(stdout)
+						return true
+					case control.ActionSearch, control.ActionSearchImportant:
+						parent, _ := r.activeSession()
+						searchImportant.Store(action == control.ActionSearchImportant)
 						search.Begin(r.clock, showSearch, parent)
 						showSearch()
 						return true

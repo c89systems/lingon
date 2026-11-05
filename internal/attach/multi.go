@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/term"
@@ -2002,8 +2003,11 @@ func (m *MultiClient) Run(ctx context.Context) error {
 	}()
 	var rename control.RenamePrompt
 	var search control.SearchPrompt
+	var searchImportant atomic.Bool
 	defer search.Close()
 	searchSessions := func() []control.SearchSession {
+		important := ui.Read().ImportantTabs
+		filtered := searchImportant.Load() && important.Active()
 		mu.Lock()
 		defer mu.Unlock()
 		items := make([]control.SearchSession, 0, len(sessions))
@@ -2011,7 +2015,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			if popups.Parent(s.ID) != "" {
 				continue
 			}
-			items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name)})
+			items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name), Excluded: filtered && !important.Contains(s.ID)})
 		}
 		return items
 	}
@@ -2393,10 +2397,18 @@ func (m *MultiClient) Run(ctx context.Context) error {
 						renderActiveCurrent()
 					}
 					return true
-				case control.ActionSearch:
+				case control.ActionMarkImportant, control.ActionResetImportant:
+					mu.Lock()
+					parent := activeID
+					mu.Unlock()
+					ui.ApplyAction(mvu.ImportantTabAction{SessionID: parent, Reset: action == control.ActionResetImportant})
+					renderActiveCurrent()
+					return true
+				case control.ActionSearch, control.ActionSearchImportant:
 					mu.Lock()
 					origin := activeID
 					mu.Unlock()
+					searchImportant.Store(action == control.ActionSearchImportant)
 					search.Begin(m.Clock, showSearch, origin)
 					showSearch()
 					return true

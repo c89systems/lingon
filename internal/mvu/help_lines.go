@@ -27,6 +27,8 @@ func HelpLines(state State) []string {
 		"Ctrl+L J  terminate popup terminal",
 		"Ctrl+L e  rename session",
 		"Ctrl+L /  find session (Tab/Shift+Tab cycle, Enter opens, Esc cancels)",
+		"Ctrl+L ?  find important session (all sessions if none marked)",
+		"Ctrl+L i (or Ctrl+L Ctrl+I)  mark tab important; Ctrl+L I resets all marks",
 		"Ctrl+L Q  close session",
 		"Ctrl+L q  quit attach (sessions keep running)",
 		"Ctrl+L C  send Enter ~. (disconnect SSH)",

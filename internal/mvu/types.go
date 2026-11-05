@@ -43,6 +43,7 @@ type State struct {
 	ScrollbackMessage string
 
 	Tabs            []Tab
+	ImportantTabs   ImportantTabs
 	ActiveTab       int
 	TabBarVisible   bool
 	TabBarShownAt   time.Time

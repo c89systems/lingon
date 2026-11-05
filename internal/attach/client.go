@@ -2396,6 +2396,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 	prefill := make([]byte, 0, 1024)
 	var prefix control.Prefix
 	var search control.SearchPrompt
+	var searchImportant atomic.Bool
 	defer search.Close()
 	searchSessions := func() []control.SearchSession {
 		name := c.SessionID
@@ -2403,7 +2404,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		if state.ActiveTab >= 0 && state.ActiveTab < len(state.Tabs) {
 			name = state.Tabs[state.ActiveTab].Title
 		}
-		return []control.SearchSession{{ID: c.SessionID, Name: name}}
+		return []control.SearchSession{{ID: c.SessionID, Name: name, Excluded: searchImportant.Load() && state.ImportantTabs.Active() && !state.ImportantTabs.Contains(c.SessionID)}}
 	}
 	// Serialize timer and input redraws so an older view cannot hide a new search.
 	var searchRenderMu sync.Mutex
@@ -2489,7 +2490,12 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return false
 				}
 				switch action {
-				case control.ActionSearch:
+				case control.ActionMarkImportant, control.ActionResetImportant:
+					c.applyCompositorAction(mvu.ImportantTabAction{SessionID: c.SessionID, Reset: action == control.ActionResetImportant})
+					c.renderCurrent()
+					return true
+				case control.ActionSearch, control.ActionSearchImportant:
+					searchImportant.Store(action == control.ActionSearchImportant)
 					search.Begin(c.clock(), showSearch, c.SessionID)
 					showSearch()
 					return true

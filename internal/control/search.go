@@ -15,6 +15,9 @@ const searchEscapeDelay = 50 * time.Millisecond
 // SearchSession identifies one searchable tab. Names need not be unique.
 type SearchSession struct {
 	ID, Name string
+	// Excluded omits a tab from suggestions and selection while preserving its
+	// position as a cycling origin in the full tab order.
+	Excluded bool
 }
 
 // SearchView is an atomic snapshot of the search field and highlighted session.
@@ -84,7 +87,7 @@ func printableName(name string) string {
 func (p *SearchPrompt) candidate(sessions []SearchSession) (SearchSession, bool) {
 	text := string(p.editor.text)
 	for _, session := range sessions {
-		if session.ID == p.selected && strings.HasPrefix(printableName(session.Name), text) {
+		if !session.Excluded && session.ID == p.selected && strings.HasPrefix(printableName(session.Name), text) {
 			return session, true
 		}
 	}
@@ -93,12 +96,12 @@ func (p *SearchPrompt) candidate(sessions []SearchSession) (SearchSession, bool)
 	}
 	// An exact name takes precedence over a longer name with the same prefix.
 	for _, session := range sessions {
-		if printableName(session.Name) == text {
+		if !session.Excluded && printableName(session.Name) == text {
 			return session, true
 		}
 	}
 	for _, session := range sessions {
-		if strings.HasPrefix(printableName(session.Name), text) {
+		if !session.Excluded && strings.HasPrefix(printableName(session.Name), text) {
 			return session, true
 		}
 	}
@@ -130,27 +133,33 @@ func (p *SearchPrompt) cycle(sessions []SearchSession, direction int) {
 		p.selected, p.completed = candidate.ID, true
 		return
 	}
-	next := 0
+	origin := -1
 	if direction < 0 {
-		next = len(sessions) - 1
+		origin = 0
 	}
 	if ok {
 		for i, session := range sessions {
 			if session.ID == candidate.ID {
-				next = (i + direction + len(sessions)) % len(sessions)
+				origin = i
 				break
 			}
 		}
 	} else if len(p.editor.text) == 0 {
 		for i, session := range sessions {
 			if session.ID == p.origin {
-				next = (i + direction + len(sessions)) % len(sessions)
+				origin = i
 				break
 			}
 		}
 	}
-	p.editor.text = []byte(printableName(sessions[next].Name))
-	p.selected, p.completed = sessions[next].ID, true
+	for step := 1; step <= len(sessions); step++ {
+		next := (origin + direction*step + len(sessions)*2) % len(sessions)
+		if !sessions[next].Excluded {
+			p.editor.text = []byte(printableName(sessions[next].Name))
+			p.selected, p.completed = sessions[next].ID, true
+			return
+		}
+	}
 }
 
 func (p *SearchPrompt) stopEscape() {

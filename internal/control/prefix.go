@@ -55,6 +55,12 @@ const (
 	ActionSSHDisconnect
 	// ActionPasteText pastes the process-local scrollback text clipboard.
 	ActionPasteText
+	// ActionMarkImportant marks the current parent tab as important.
+	ActionMarkImportant
+	// ActionResetImportant leaves important-tab mode and clears all marks.
+	ActionResetImportant
+	// ActionSearchImportant searches important tabs, or all tabs outside that mode.
+	ActionSearchImportant
 )
 
 // Prefix tracks ctrl+l command state.
@@ -117,6 +123,12 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionPasteText, nil
 		case '/':
 			return ActionSearch, nil
+		case '?':
+			return ActionSearchImportant, nil
+		case 'i', 0x09: // Ctrl+I (Tab)
+			return ActionMarkImportant, nil
+		case 'I':
+			return ActionResetImportant, nil
 		case '!':
 			return ActionToggleRestore, nil
 		case '0', 0:

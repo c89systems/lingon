@@ -176,14 +176,18 @@ func composeTopOverlayResolved(cols int, cursor Cursor, resolved Resolved, inclu
 
 func composeTopOverlay(buf *bytes.Buffer, cols int, cursor Cursor, resolved Resolved, includeTabs bool, prevConnectionLen, prevScrollbackLen int) {
 	state := resolved.State
+	padTheme := state.Theme
+	if state.ImportantTabs.Active() {
+		padTheme.TabBg, padTheme.TabFg = state.Theme.DimmedTabs.Bg, state.Theme.DimmedTabs.Fg
+	}
 	if includeTabs && resolved.TabBarVisible {
-		DrawTabBar(buf, cols, state.Tabs, state.ActiveTab, state.Theme)
+		DrawTabBar(buf, TabBarInput{Cols: cols, Tabs: state.Tabs, Active: state.ActiveTab, Theme: state.Theme, Important: state.ImportantTabs})
 	}
 	if resolved.ConnectionVisible {
 		msg := state.ConnectionMessage
 		if prevConnectionLen > len(msg) {
 			if !includeTabs && resolved.TabBarVisible {
-				DrawTabBasePadAtRow(buf, cols, 1, prevConnectionLen, len(msg), state.Theme)
+				DrawTabBasePadAtRow(buf, cols, 1, prevConnectionLen, len(msg), padTheme)
 			} else {
 				msg = strings.Repeat(" ", prevConnectionLen-len(msg)) + msg
 			}
@@ -197,7 +201,7 @@ func composeTopOverlay(buf *bytes.Buffer, cols int, cursor Cursor, resolved Reso
 		msg := state.ScrollbackMessage
 		if prevScrollbackLen > len(msg) {
 			if !includeTabs && resolved.TabBarVisible {
-				DrawTabBasePadAtRow(buf, cols, 1, prevScrollbackLen, len(msg), state.Theme)
+				DrawTabBasePadAtRow(buf, cols, 1, prevScrollbackLen, len(msg), padTheme)
 			} else {
 				msg = strings.Repeat(" ", prevScrollbackLen-len(msg)) + msg
 			}
@@ -237,11 +241,19 @@ func tabBarSignature(cols int, state State) uint64 {
 	writeSigString(state.Theme.TabMutedActiveFg)
 	writeSigString(state.Theme.TabActiveBg)
 	writeSigString(state.Theme.TabActiveFg)
+	writeSigBool(state.ImportantTabs.Active())
+	writeSigString(state.Theme.DimmedTabs.Bg)
+	writeSigString(state.Theme.DimmedTabs.Fg)
+	writeSigString(state.Theme.DimmedTabs.ActiveBg)
+	writeSigString(state.Theme.DimmedTabs.ActiveFg)
+	writeSigString(state.Theme.DimmedTabs.MutedFg)
+	writeSigString(state.Theme.DimmedTabs.MutedActiveFg)
 	writeSigString(state.Theme.Reset)
 	for _, tab := range state.Tabs {
 		binary.LittleEndian.PutUint64(n[:], uint64(tab.Index))
 		_, _ = h.Write(n[:])
 		writeSigString(tab.Title)
+		writeSigBool(state.ImportantTabs.Contains(tab.ID))
 		writeSigBool(tab.Disabled)
 		writeSigBool(tab.Muted)
 		writeSigBool(tab.Highlighted)

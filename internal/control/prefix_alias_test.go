@@ -14,6 +14,9 @@ func TestPrefixControlAliases(t *testing.T) {
 		{"previous", 0x10, 'p', ActionPrevTab},
 		{"theme", 0x14, 't', ActionNextTheme},
 		{"paste-text", ']', ']', ActionPasteText},
+		{"important", 0x09, 'i', ActionMarkImportant},
+		{"reset-important", 'I', 'I', ActionResetImportant},
+		{"search-important", '?', '?', ActionSearchImportant},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []byte{tc.letter, tc.key} {
