@@ -34,6 +34,7 @@ import (
 	"pkt.systems/lingon/internal/testutil"
 	"pkt.systems/lingon/internal/tlsmgr"
 	"pkt.systems/lingon/internal/trace"
+	"pkt.systems/pslog"
 )
 
 // Harness provisions an in-process server and PTY-backed clients.
@@ -768,6 +769,8 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 
 // MultiAttachOptions configures a PTY-backed multi-session attach client.
 type MultiAttachOptions struct {
+	// Logger observes client events without changing process-wide logging.
+	Logger pslog.Logger
 	// Geometry overrides logical startup dimensions without resizing the owned outer PTY.
 	Geometry *terminal.WindowSize
 	// Restore enables remote-size following in this test-owned PTY.
@@ -863,6 +866,7 @@ func (h *Harness) StartMultiAttach(opts MultiAttachOptions) *PTYSession {
 		opts.DesktopNotifier,
 	)
 	client := &attach.MultiClient{
+		Logger:  opts.Logger,
 		Restore: opts.Restore,
 		Cols:    geometryCols(opts.Geometry), Rows: geometryRows(opts.Geometry),
 		Endpoint:                    endpoint,

@@ -120,6 +120,13 @@ Tokens are stored at `~/.lingon/auth.json` by default.
 The file stores auth per normalized endpoint key, so switching `-e/--endpoint`
 reuses the matching cached refresh/access tokens.
 
+An established `lingon attach` keeps its live terminal connections when credential
+refresh encounters a temporary network, proxy, or server failure (such as HTTP
+502). Saved credentials remain intact; the normal refresh/reconnect schedule can
+recover without logging in again. A failed attempt to open another tab leaves
+the current tab visible and usable. An expired or rejected refresh token still
+requires authentication. Refresh POSTs are not blindly replayed on server errors.
+
 Log out from an endpoint (remote revoke + local token removal):
 
 ```bash

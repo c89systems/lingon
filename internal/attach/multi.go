@@ -232,7 +232,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 	if !localSessionMode && m.AccessToken == "" && m.TokenRefresher != nil {
 		token, err := m.refreshToken(ctx)
 		if err != nil {
-			return authExpiredError(m.Endpoint, err)
+			return authRefreshError(m.Endpoint, err)
 		}
 		m.AccessToken = token
 	}
@@ -809,7 +809,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		renderActiveCurrent()
 	}
 
+	type viewPreparation struct{ unixSocket string }
 	type viewSeed struct {
+		preparation   *viewPreparation
 		client        *Client
 		connectedOnce bool
 		reconnectAt   time.Time
@@ -831,14 +833,12 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		return seed
 	}
-	var connectView func(SessionInfo, bool, viewSeed) (*sessionView, error)
-	connectView = func(session SessionInfo, visible bool, seed viewSeed) (*sessionView, error) {
-		if m.Logger != nil {
-			m.Logger.Debug("attach.view.connect.start", "session", session.ID, "visible", visible, "has_prev", seed.client != nil)
-		}
+	// Resolve fallible authentication/socket preparation before an activation
+	// changes visibility. Failed preparation must leave the live view untouched.
+	prepareView := func(session SessionInfo) (*viewPreparation, error) {
 		if !localSessionMode && m.TokenRefresher != nil {
 			if _, err := m.refreshToken(ctx); err != nil {
-				return nil, authExpiredError(m.Endpoint, err)
+				return nil, authRefreshError(m.Endpoint, err)
 			}
 		}
 		unixSocket := ""
@@ -852,6 +852,23 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				return nil, fmt.Errorf("session %q has no local socket", session.ID)
 			}
 		}
+
+		return &viewPreparation{unixSocket: unixSocket}, nil
+	}
+	var connectView func(SessionInfo, bool, viewSeed) (*sessionView, error)
+	connectView = func(session SessionInfo, visible bool, seed viewSeed) (*sessionView, error) {
+		if m.Logger != nil {
+			m.Logger.Debug("attach.view.connect.start", "session", session.ID, "visible", visible, "has_prev", seed.client != nil)
+		}
+		preparation := seed.preparation
+		if preparation == nil {
+			var err error
+			preparation, err = prepareView(session)
+			if err != nil {
+				return nil, err
+			}
+		}
+		unixSocket := preparation.unixSocket
 		view := &sessionView{
 			id:            session.ID,
 			name:          mvu.SessionLabel(session.ID, session.Name),
@@ -1457,6 +1474,16 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			return fmt.Errorf("session %q not found", nextID)
 		}
 		changedActive := activeID != nextID
+		var preparation *viewPreparation
+		current := views[nextID]
+		if current == nil || current.client == nil || (!current.connected && !current.connecting) {
+			var err error
+			preparation, err = prepareView(*nextSession)
+			if err != nil {
+				mu.Unlock()
+				return err
+			}
+		}
 		if view, ok := views[nextID]; ok && view.client != nil {
 			reconnect := !view.connected && !view.connecting
 			if activeID != nextID {
@@ -1489,7 +1516,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				reconnectAt := view.reconnectAt
 				reconnectGen := view.reconnectGen
 				view.cancel()
-				nextView, err := connectView(*nextSession, true, snapshotViewLocked(true, view))
+				seed := snapshotViewLocked(true, view)
+				seed.preparation = preparation
+				nextView, err := connectView(*nextSession, true, seed)
 				if err != nil {
 					mu.Unlock()
 					return err
@@ -1563,7 +1592,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			}
 		}
 
-		view, err := connectView(*nextSession, true, snapshotViewLocked(true, prevView))
+		seed := snapshotViewLocked(true, prevView)
+		seed.preparation = preparation
+		view, err := connectView(*nextSession, true, seed)
 		if err != nil {
 			mu.Unlock()
 			return err
@@ -2859,7 +2890,7 @@ func (m *MultiClient) fetchSessions(ctx context.Context, httpURL string) ([]Sess
 	}
 	if m.TokenRefresher != nil {
 		if _, err := m.refreshToken(ctx); err != nil {
-			return nil, authExpiredError(m.Endpoint, err)
+			return nil, authRefreshError(m.Endpoint, err)
 		}
 	}
 	tlsCfg, err := clientTLSConfig(m.TLSDir, m.Insecure)
@@ -2887,13 +2918,13 @@ func (m *MultiClient) fetchSessions(ctx context.Context, httpURL string) ([]Sess
 			return nil, err
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
-			if attempt == 0 {
+			if attempt == 0 && m.TokenRefresher != nil {
 				if _, refreshErr := m.refreshToken(ctx); refreshErr == nil {
 					_ = resp.Body.Close()
 					continue
 				} else {
 					_ = resp.Body.Close()
-					return nil, authExpiredError(m.Endpoint, refreshErr)
+					return nil, authRefreshError(m.Endpoint, refreshErr)
 				}
 			}
 			msg := authErrorMessage(resp)

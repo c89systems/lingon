@@ -356,7 +356,7 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 	} else if c.ShareToken == "" {
 		if c.TokenRefresher != nil {
 			if _, err := c.refreshToken(ctx); err != nil {
-				return authExpiredError(c.Endpoint, err)
+				return authRefreshError(c.Endpoint, err)
 			}
 		}
 		if c.accessToken() == "" {
@@ -570,7 +570,7 @@ func (c *Client) dialWithRefresh(ctx context.Context, url string, opts *websocke
 		ws, resp, err := websocket.Dial(ctx, url, opts)
 		if err != nil {
 			if resp != nil && resp.StatusCode == http.StatusUnauthorized {
-				if attempt == 0 && c.ShareToken == "" {
+				if attempt == 0 && c.ShareToken == "" && c.TokenRefresher != nil {
 					if _, refreshErr := c.refreshToken(ctx); refreshErr == nil {
 						if resp.Body != nil {
 							_ = resp.Body.Close()
@@ -581,7 +581,7 @@ func (c *Client) dialWithRefresh(ctx context.Context, url string, opts *websocke
 						if resp.Body != nil {
 							_ = resp.Body.Close()
 						}
-						return nil, authExpiredError(c.Endpoint, refreshErr)
+						return nil, authRefreshError(c.Endpoint, refreshErr)
 					}
 				}
 				msg := authErrorMessage(resp)
@@ -633,6 +633,18 @@ func (c *Client) refreshToken(ctx context.Context) (string, error) {
 	}
 	c.SetAccessToken(token)
 	return token, nil
+}
+
+// Only definitive credential failures may cancel the owner's attach UI. A
+// refresh endpoint outage says nothing about the validity of live connections.
+func authRefreshError(endpoint string, err error) error {
+	if errors.Is(err, ErrAuthExpired) {
+		return err
+	}
+	if errors.Is(err, relayclient.ErrCredentialsRejected) {
+		return authExpiredError(endpoint, err)
+	}
+	return fmt.Errorf("authentication refresh failed: %w", err)
 }
 
 func authExpiredError(endpoint string, err error) error {
