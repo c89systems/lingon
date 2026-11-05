@@ -89,13 +89,14 @@ type localSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	onOutput    func(id string, data []byte, snap *protocolpb.Snapshot)
-	onPTYRead   func([]byte)
-	onSnapshot  func(terminal.Snapshot)
-	onExit      func(id string, err error)
-	csiState    csiParser
-	oscState    oscStreamParser
-	cursorQuery func(terminal.Snapshot) (row, col int, ok bool)
+	onOutput     func(id string, data []byte, snap *protocolpb.Snapshot)
+	onPTYRead    func([]byte)
+	onSnapshot   func(terminal.Snapshot)
+	onScrollback func([]terminal.ScrollbackRow, int)
+	onExit       func(id string, err error)
+	csiState     csiParser
+	oscState     oscStreamParser
+	cursorQuery  func(terminal.Snapshot) (row, col int, ok bool)
 
 	oscDefaultsMu    sync.RWMutex
 	oscDefaultFg     string
@@ -445,6 +446,7 @@ type localSessionOptions struct {
 	OnOutput          func(id string, data []byte, snap *protocolpb.Snapshot)
 	OnPTYRead         func([]byte)
 	OnSnapshot        func(terminal.Snapshot)
+	OnScrollback      func([]terminal.ScrollbackRow, int)
 	OnExit            func(id string, err error)
 	CursorQuery       func(terminal.Snapshot) (row, col int, ok bool)
 	Trace             *trace.Writer
@@ -482,6 +484,7 @@ func newLocalSession(parent context.Context, opts localSessionOptions) *localSes
 		onOutput:          opts.OnOutput,
 		onPTYRead:         opts.OnPTYRead,
 		onSnapshot:        opts.OnSnapshot,
+		onScrollback:      opts.OnScrollback,
 		onExit:            opts.OnExit,
 		cursorQuery:       opts.CursorQuery,
 		trace:             opts.Trace,
@@ -2413,9 +2416,6 @@ func (s *localSession) processPTYOutput(data []byte) error {
 	if suppressResizeRedraw {
 		return nil
 	}
-	if s.onSnapshot != nil {
-		s.onSnapshot(rawSnap)
-	}
 	protoSnap := protocol.SnapshotToProto(rawSnap)
 	snap := protoSnap
 	resetViewport := !s.allowRemoteResize && localOutputForcesFullRedraw(filtered)
@@ -2436,14 +2436,23 @@ func (s *localSession) processPTYOutput(data []byte) error {
 	}
 	scrollRows = s.appendScrollback(s.drainScrollbackRows(scrollRows))
 	s.commitScrollbackFrame(snap)
+	// Deliver committed history before its live snapshot on either transport.
+	// A relay-disabled headless session still has local viewers needing history.
+	if len(scrollRows) > 0 {
+		if s.publisher != nil {
+			s.publisher.PublishScrollback(scrollRows, int(snap.Cols), false)
+		} else if s.onScrollback != nil {
+			s.onScrollback(scrollRows, int(snap.Cols))
+		}
+	}
+	if s.onSnapshot != nil {
+		s.onSnapshot(rawSnap)
+	}
 	if s.onOutput != nil {
 		s.onOutput(s.id, filtered, snap)
 	}
 	s.notifyOutput()
 	if s.publisher != nil {
-		if len(scrollRows) > 0 {
-			s.publisher.PublishScrollback(scrollRows, int(snap.Cols), false)
-		}
 		s.publisher.Publish(filtered, snap)
 	}
 	return nil

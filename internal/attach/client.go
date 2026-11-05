@@ -1271,7 +1271,7 @@ func (c *Client) setScrollbackMouseActive(active bool) {
 }
 
 func (c *Client) scrollbackPage(delta int, stepRows int) bool {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	viewRows := c.scrollbackViewRows()
@@ -1288,7 +1288,7 @@ func (c *Client) scrollbackPage(delta int, stepRows int) bool {
 }
 
 func (c *Client) scrollbackPanX(delta int) bool {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	totalRows := snapshotRows
@@ -1730,7 +1730,7 @@ func (c *Client) ScrollbackPanX(delta int) bool {
 
 // ScrollbackTop jumps to the start of the scrollback buffer.
 func (c *Client) ScrollbackTop(viewRows int) {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	totalRows := snapshotRows
@@ -1749,7 +1749,7 @@ func (c *Client) ScrollbackTop(viewRows int) {
 
 // ScrollbackBottom jumps back to the live view position.
 func (c *Client) ScrollbackBottom() {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	totalRows := snapshotRows
@@ -2285,6 +2285,14 @@ func (c *Client) helpVisible() bool {
 		return true
 	}
 	return c.renderHelpVisible()
+}
+
+// Navigation counts the source grid, not the parent's composed framebuffer.
+// Embedded popup views do not populate a standalone render cache.
+func (c *Client) scrollbackSnapshotRows() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return int(c.lastSnapshot.GetRows())
 }
 
 func (c *Client) renderSnapshotRows() int {

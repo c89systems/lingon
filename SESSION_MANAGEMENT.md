@@ -56,6 +56,11 @@ enclosing-terminal `LINES`/`COLUMNS` exports are removed so programs query their
 own terminal. Taking control or typing into a popup keeps its bounded geometry.
 The parent retains normal window-resize behavior.
 
+`Ctrl+l [` browses the focused popup's own scrollback within its content box.
+The separator stays above it; `g` reaches the oldest retained row, `G` returns
+to the newest rows, and `q` returns to the live popup. This also works in offline
+local headless attach.
+
 `Ctrl+l Q` force-closes the focused terminal, including a shown popup, without
 depending on terminal input or EOF handling. Owner-authorized remote close uses
 the management transport; its acknowledgement is written before the host closes

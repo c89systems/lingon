@@ -32,6 +32,7 @@ import (
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/publisher"
 	"pkt.systems/lingon/internal/relayclient"
+	"pkt.systems/lingon/internal/relaywire"
 	"pkt.systems/lingon/internal/render"
 	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/sessionorder"
@@ -2097,6 +2098,14 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 		// Terminal replies use popup-local coordinates, never the composed cursor.
 		cursorQuery = func(s terminal.Snapshot) (int, int, bool) { return s.Cursor.Y + 1, s.Cursor.X + 1, true }
 	}
+	var onScrollback func([]terminal.ScrollbackRow, int)
+	if !r.opts.Publish && r.opts.OnPublishFrame != nil {
+		onScrollback = func(rows []terminal.ScrollbackRow, cols int) {
+			for _, frame := range relaywire.BuildScrollbackFrames(id, cols, rows, false) {
+				r.opts.OnPublishFrame(frame)
+			}
+		}
+	}
 	session := newLocalSession(ctx, localSessionOptions{
 		ID:                id,
 		WorkingDirectory:  directory,
@@ -2113,6 +2122,7 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 		OnOutput:          r.handleLocalOutput(stdout, stdin),
 		OnPTYRead:         r.opts.OnPTYRead,
 		OnSnapshot:        r.opts.OnSnapshot,
+		OnScrollback:      onScrollback,
 		OnExit:            r.handleLocalExit(stdout, stdin),
 		CursorQuery:       cursorQuery,
 		Trace:             r.trace,
