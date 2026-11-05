@@ -23,7 +23,8 @@ func TestScrollbackCopyPasteCLIAndProcessIsolation(t *testing.T) {
 			cfg := filepath.Join(home, lingon.DefaultConfigDirName)
 			cleanupManagedTerminals(t, cfg)
 			if transport == "relay" {
-				host := h.StartHost(ptytest.HostOptions{SessionID: id, Shell: fixedPromptEmitRowsBash(t), Cols: 100, Rows: 20})
+				host := h.StartHost(ptytest.HostOptions{SessionID: id, Shell: fixedPromptEmitRowsBash(t), Cols: 100, Rows: 20,
+					ConfigDir: cfg, HeadlessExecutable: buildLingonAttachBinary(t)})
 				t.Cleanup(host.Cancel)
 				waitForSessionsWithTimeout(t, h.Clock(), h.Endpoint(), h.AccessToken(), []string{id}, 8*time.Second)
 			} else {
@@ -73,6 +74,20 @@ func TestScrollbackCopyPasteCLIAndProcessIsolation(t *testing.T) {
 			popupScreen(t, viewer, func(s ptytest.Screen) bool {
 				return strings.HasPrefix(s.Row(0), "PROMPT>") && !s.Contains("PASTE_FENCE")
 			})
+			viewer.Send("\x0cj")
+			popupScreen(t, viewer, func(s ptytest.Screen) bool {
+				return strings.Contains(s.Row(10), "j hide") && strings.Contains(strings.Join(s.Lines[11:], "\n"), "PROMPT>")
+			})
+			viewer.Send("\x0c]POPUP_PASTE_FENCE")
+			popupScreen(t, viewer, func(s ptytest.Screen) bool {
+				pane := strings.Join(s.Lines[11:], "\n")
+				return strings.Contains(pane, first) && strings.Contains(pane, second) && strings.Contains(pane, "POPUP_PASTE_FENCE")
+			})
+			if viewer.Screen().Contains("command not found") {
+				t.Fatal("popup paste executed the copied lines")
+			}
+			viewer.Send("\x03\x0cj\x0cJ")
+			popupScreen(t, viewer, func(s ptytest.Screen) bool { return !s.Contains("j hide") && strings.HasPrefix(s.Row(0), "PROMPT>") })
 			other := start()
 			t.Cleanup(other.Cancel)
 			popupScreen(t, other, func(s ptytest.Screen) bool { return strings.HasPrefix(s.Row(0), "PROMPT>") })
