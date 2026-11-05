@@ -107,7 +107,7 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionToggleWallInactivity, nil
 		case 'o', 'O':
 			return ActionToggleOffline, nil
-		case 'h', 'H':
+		case 'h', 'H', 0x08: // Ctrl+H
 			return ActionHelp, nil
 		case 'n', 'N', 0x0e: // Ctrl+N
 			return ActionNextTab, nil

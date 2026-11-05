@@ -167,7 +167,8 @@ lingon -e https://localhost:12843/v1 -s my-session
 lingon
 ```
 
-Lingon uses prefix keystroke `Ctrl+l` as *command introducer*, see `Ctrl+l h` (`ctrl+l` followed by `h`) for help.
+Lingon uses prefix keystroke `Ctrl+l` as *command introducer*. Press `Ctrl+l h`
+(`ctrl+l` followed by `h`), or `Ctrl+l Ctrl+h`, for help.
 
 ![ctrl-l h help](lingon-ctrl-l-h.gif)
 

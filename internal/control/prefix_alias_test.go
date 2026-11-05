@@ -9,6 +9,7 @@ func TestPrefixControlAliases(t *testing.T) {
 		letter byte
 		want   Action
 	}{
+		{"help", 0x08, 'h', ActionHelp},
 		{"popup", 0x0a, 'j', ActionPopup},
 		{"next", 0x0e, 'n', ActionNextTab},
 		{"previous", 0x10, 'p', ActionPrevTab},

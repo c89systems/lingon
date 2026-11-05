@@ -49,6 +49,12 @@ func TestHelpCopyrightHeaderHostAndAttachPTY(t *testing.T) {
 			}
 			viewer.Send("qheader-fence\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:header-fence") && !s.Contains(mvu.HelpCopyright) })
+			viewer.Send("\x0c\x08") // Ctrl+L Ctrl+H.
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
+				return s.Contains(mvu.HelpCopyright) && s.Contains("press q or Q to close help")
+			})
+			viewer.Send("qalias-fence\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:alias-fence") && !s.Contains(mvu.HelpCopyright) })
 		})
 	}
 }

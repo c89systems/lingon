@@ -43,7 +43,8 @@ popup survives and becomes a normal tab. `Ctrl+l J` forcefully terminates the
 popup, even while hidden.
 
 After `Ctrl+l`, `Ctrl+j` is an alias for `j` (show/hide popup), `Ctrl+n` for `n`
-(next tab), `Ctrl+p` for `p` (previous tab), and `Ctrl+t` for `t` (next theme).
+(next tab), `Ctrl+p` for `p` (previous tab), `Ctrl+t` for `t` (next theme), and
+`Ctrl+h` for `h` (help).
 These control keys pass through normally without the prefix. Session search
 uses `Ctrl+l /` for all tabs and `Ctrl+l ?` for important tabs.
 

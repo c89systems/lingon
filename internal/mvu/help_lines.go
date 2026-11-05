@@ -21,7 +21,7 @@ func HelpLines(state State) []string {
 		HelpCopyright,
 		"endpoint: " + state.Endpoint,
 		"",
-		"Ctrl+L h  help",
+		"Ctrl+L h  help (also Ctrl+L Ctrl+H)",
 		"Ctrl+L c  new session",
 		"Ctrl+L j  show/hide popup terminal",
 		"Ctrl+L J  terminate popup terminal",
