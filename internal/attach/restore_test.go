@@ -44,7 +44,7 @@ func TestRestoreRechecksQueuedFramesAtDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ws.CloseNow()
-	c := &Client{Clock: clock.NewMock(), restoreMode: newRestoreMode(false)}
+	c := &Client{Clock: clock.NewMock(), WindowRestore: terminal.NewWindowRestore(false)}
 	hello := c.buildHelloFrame(80, 24)
 	// Construct frames while normal sizing is active, then hold delivery behind
 	// earlier input. No scheduler timing is needed: restoration changes before
@@ -76,7 +76,7 @@ func TestRestoreRechecksQueuedFramesAtDelivery(t *testing.T) {
 }
 
 func TestRestoreOmitsHelloDimensionsAndSuppressesResize(t *testing.T) {
-	c := &Client{restoreMode: newRestoreMode(true)}
+	c := &Client{WindowRestore: terminal.NewWindowRestore(true)}
 	hello := c.buildHelloFrame(80, 24).GetHello()
 	if hello.Cols != 0 || hello.Rows != 0 {
 		t.Fatalf("hello resizes remote: %v", hello)
@@ -96,7 +96,7 @@ func TestRestoreOmitsHelloDimensionsAndSuppressesResize(t *testing.T) {
 
 func TestRestoreLoadingPlaceholderDoesNotRequestWindowSize(t *testing.T) {
 	var output bytes.Buffer
-	c := &Client{Clock: clock.NewMock(), Stdout: &output, restoreMode: newRestoreMode(true), TermSize: func() (int, int) { return 80, 24 }}
+	c := &Client{Clock: clock.NewMock(), Stdout: &output, WindowRestore: terminal.NewWindowRestore(true), TermSize: func() (int, int) { return 80, 24 }}
 	c.renderSnapshot(mvu.BlankSnapshot(100, 30))
 	if strings.Contains(output.String(), "\x1b[8;30;100t") {
 		t.Fatal("placeholder was treated as the remote viewport")
@@ -107,7 +107,7 @@ func TestRestoreRequestDeduplicationAndWarning(t *testing.T) {
 	clk := clock.NewMock()
 	var output bytes.Buffer
 	cols, rows := 80, 24
-	c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), TermSize: func() (int, int) { return cols, rows }}
+	c := &Client{Clock: clk, Stdout: &output, WindowRestore: terminal.NewWindowRestore(true), TermSize: func() (int, int) { return cols, rows }}
 	stop := c.startEffects(context.Background())
 	defer stop()
 	c.ensureCompositor()
@@ -145,7 +145,7 @@ func TestRestoreHiddenAndConfirmedRequestsDoNotWarn(t *testing.T) {
 		clk := clock.NewMock()
 		var output bytes.Buffer
 		cols, rows := 80, 24
-		c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), TermSize: func() (int, int) { return cols, rows }}
+		c := &Client{Clock: clk, Stdout: &output, WindowRestore: terminal.NewWindowRestore(true), TermSize: func() (int, int) { return cols, rows }}
 		stop := c.startEffects(context.Background())
 		c.ensureCompositor()
 		c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
@@ -166,7 +166,7 @@ func TestRestoreWindowRequestRunsOnlyOnEntryAndActivation(t *testing.T) {
 	clk := clock.NewMock()
 	var output bytes.Buffer
 	cols, rows := 80, 24
-	c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), TermSize: func() (int, int) { return cols, rows }}
+	c := &Client{Clock: clk, Stdout: &output, WindowRestore: terminal.NewWindowRestore(true), TermSize: func() (int, int) { return cols, rows }}
 	stop := c.startEffects(t.Context())
 	defer stop()
 	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
@@ -211,7 +211,7 @@ func TestRestoreManualResizeDoesNotRememberRejectedViewOnlySize(t *testing.T) {
 	clk := clock.NewMock()
 	var output bytes.Buffer
 	cols, rows := 80, 24
-	c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), viewOnly: true, TermSize: func() (int, int) { return cols, rows }}
+	c := &Client{Clock: clk, Stdout: &output, WindowRestore: terminal.NewWindowRestore(true), viewOnly: true, TermSize: func() (int, int) { return cols, rows }}
 	stop := c.startEffects(t.Context())
 	defer stop()
 	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))
@@ -235,7 +235,7 @@ func TestRestoreClearsPendingManualSizeAfterControlIsDenied(t *testing.T) {
 	clk := clock.NewMock()
 	var output bytes.Buffer
 	cols, rows := 80, 24
-	c := &Client{Clock: clk, Stdout: &output, restoreMode: newRestoreMode(true), TermSize: func() (int, int) { return cols, rows }}
+	c := &Client{Clock: clk, Stdout: &output, WindowRestore: terminal.NewWindowRestore(true), TermSize: func() (int, int) { return cols, rows }}
 	stop := c.startEffects(t.Context())
 	defer stop()
 	c.restoreTerminalLocked(mvu.BlankSnapshot(100, 30))

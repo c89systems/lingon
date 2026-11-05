@@ -57,6 +57,7 @@ func NewRootCommand(loader *lingon.Loader) *cobra.Command {
 	var wallInactiveAfter string
 	var termName string
 	var respawn bool
+	var restore bool
 	var offline bool
 	var disableDesktopNotifications bool
 	var hostnameOnly bool
@@ -227,6 +228,7 @@ func NewRootCommand(loader *lingon.Loader) *cobra.Command {
 				Shell:                       shellPath,
 				Term:                        termValue,
 				Respawn:                     respawnValue,
+				Restore:                     restore,
 				Offline:                     offline,
 				Theme:                       resolvedTheme,
 				Publish:                     endpointValue != "",
@@ -270,7 +272,8 @@ func NewRootCommand(loader *lingon.Loader) *cobra.Command {
 	flags.IntVar(&scrollbackLines, "scrollback-lines", lingon.DefaultScrollbackLines, "max scrollback lines to buffer")
 	flags.StringVar(&wallInactiveAfter, "wall-inactive-after", lingon.DefaultWallInactiveAfterCSV, "CSV inactivity levels for Ctrl+L w cycling in local headless mode; empty uses defaults")
 	flags.StringVar(&termName, "term", lingon.DefaultTerminalTermValue(), "TERM for the PTY session")
-	flags.BoolVarP(&respawn, "respawn", "r", lingon.DefaultTerminalRespawn, "respawn shell on exit (host sessions only)")
+	flags.BoolVarP(&restore, "restore", "r", false, "restore the terminal window to each selected session size")
+	flags.BoolVarP(&respawn, "respawn", "R", lingon.DefaultTerminalRespawn, "respawn shell on exit (host sessions only)")
 	flags.BoolVarP(&offline, "offline", "o", false, "start host sessions offline (no relay publish/connect until Ctrl+L o)")
 	flags.BoolVar(&hostnameOnly, "hostname-only", lingon.DefaultTerminalHostnameOnly, "show only hostname in reconnect banners")
 	flags.BoolVar(&disableDesktopNotifications, "disable-desktop-notifications", lingon.DefaultTerminalDisableDesktopNotifications, "disable best-effort desktop notifications for inactivity walls")

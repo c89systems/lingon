@@ -72,6 +72,7 @@ type remoteView struct {
 }
 
 type remoteOptions struct {
+	WindowRestore               *terminal.WindowRestore
 	TextClipboard               *control.TextClipboard
 	Popup                       func(string) *mvu.Popup
 	DisableDesktopNotifications bool
@@ -98,6 +99,7 @@ type remoteOptions struct {
 }
 
 type remoteManager struct {
+	windowRestore               *terminal.WindowRestore
 	textClipboard               *control.TextClipboard
 	popup                       func(string) *mvu.Popup
 	endpoint                    string
@@ -164,12 +166,17 @@ func newRemoteManager(opts remoteOptions) *remoteManager {
 		Endpoint: opts.Endpoint,
 		Theme:    theme.TUI(themeName),
 	}})
+	windowRestore := opts.WindowRestore
+	if windowRestore == nil {
+		windowRestore = terminal.NewWindowRestore(false)
+	}
 	textClipboard := opts.TextClipboard
 	if textClipboard == nil {
 		textClipboard = &control.TextClipboard{}
 	}
 	return &remoteManager{
 		textClipboard:               textClipboard,
+		windowRestore:               windowRestore,
 		popup:                       opts.Popup,
 		endpoint:                    opts.Endpoint,
 		endpointLabel:               config.EndpointDisplay(opts.Endpoint, opts.HostnameOnly),
@@ -778,6 +785,7 @@ func (m *remoteManager) connectView(ctx context.Context, view *remoteView, stdou
 		}
 		client = &attach.Client{
 			TextClipboard:               m.textClipboard,
+			WindowRestore:               m.windowRestore,
 			Endpoint:                    m.endpoint,
 			SessionID:                   session.ID,
 			AccessToken:                 token,
@@ -786,6 +794,7 @@ func (m *remoteManager) connectView(ctx context.Context, view *remoteView, stdou
 			DisableDesktopNotifications: m.disableDesktopNotifications,
 			DesktopNotifier:             m.desktopNotifier,
 			TLSDir:                      m.tlsDir,
+			Insecure:                    m.insecure,
 			TermSize:                    m.termSize,
 			Theme:                       themeName,
 			Logger:                      m.logger,
@@ -1742,4 +1751,21 @@ func clientTLSConfig(tlsDir string, insecure bool) (*tls.Config, error) {
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: insecure,
 	}, nil
+}
+
+func (m *remoteManager) processTerminalResize(ctx context.Context, id string) error {
+	_, c := m.viewClient(id)
+	if c == nil {
+		return nil
+	}
+	return c.ProcessTerminalResize(ctx, m.sessionAllowsResize(id))
+}
+func (m *remoteManager) toggleRestore(id string) bool {
+	_, c := m.viewClient(id)
+	if c != nil {
+		return c.ToggleRestore()
+	}
+	enabled := !m.windowRestore.Load()
+	m.windowRestore.Store(enabled)
+	return enabled
 }

@@ -61,7 +61,7 @@ func TestGeometryWarningAndAcknowledgement(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c := &Client{Clock: clk, Stdout: &output, geometry: g, restoreMode: newRestoreMode(false), TermSize: func() (int, int) { return cols, rows }}
+		c := &Client{Clock: clk, Stdout: &output, geometry: g, WindowRestore: terminal.NewWindowRestore(false), TermSize: func() (int, int) { return cols, rows }}
 		stop := c.startEffects(t.Context())
 		c.ensureCompositor()
 		// No socket is required to verify local output and the injected-clock warning.
@@ -125,7 +125,7 @@ func TestGeometryRechecksQueuedResizeAtDelivery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c := &Client{Clock: clock.NewMock(), geometry: g, restoreMode: newRestoreMode(false), TermSize: func() (int, int) { return 80, 24 }}
+		c := &Client{Clock: clock.NewMock(), geometry: g, WindowRestore: terminal.NewWindowRestore(false), TermSize: func() (int, int) { return 80, 24 }}
 		stale := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: 80, Rows: 24}}}
 		c.writeMu.Lock()
 		done := make(chan error, 1)

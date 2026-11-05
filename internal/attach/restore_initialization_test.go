@@ -3,6 +3,8 @@ package attach
 import (
 	"sync"
 	"testing"
+
+	"pkt.systems/lingon/internal/terminal"
 )
 
 // Render callbacks may inspect a client before its Run goroutine has started.
@@ -26,9 +28,9 @@ func TestRestoreModeHonorsConfigurationBeforeRun(t *testing.T) {
 }
 
 func TestRestoreInitializationPreservesSharedMode(t *testing.T) {
-	mode := newRestoreMode(false)
-	first := &Client{Restore: true, restoreMode: mode}
-	second := &Client{restoreMode: mode}
+	mode := terminal.NewWindowRestore(false)
+	first := &Client{Restore: true, WindowRestore: mode}
+	second := &Client{WindowRestore: mode}
 	if first.restoreEnabled() || second.restoreEnabled() {
 		t.Fatal("local config replaced the supplied shared mode")
 	}

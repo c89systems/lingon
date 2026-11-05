@@ -271,7 +271,8 @@ Interactive host options (selection):
 - `--cols`, `--rows` terminal size (`0` means auto-detect for interactive host; built-in default for headless)
 - `--scrollback-lines` scrollback lines
 - `--term` TERM value for the PTY
-- `-r, --respawn` respawn the shell on exit
+- `-R, --respawn` respawn the shell on exit
+- `-r, --restore` restore the terminal window to each selected session's size
 - `-o, --offline` start offline; toggle relay publishing with `Ctrl+l o`
 - `--hostname-only` show hostname-only reconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)
@@ -450,6 +451,15 @@ keep their own dimensions. Acknowledging Lingon's window request does not resize
 the remote session. Turning restoration off resumes the usual resize policy:
 remote headless sessions follow the local viewport; interactive hosts retain
 their own size.
+
+`lingon -r` / `lingon --restore` enables the same behavior in the interactive
+host's tab UI. Switching to an attached remote session restores its dimensions;
+returning to a local host tab restores that tab's initial or manually resized
+size. Manual resizing changes only the selected session. `Ctrl+l !` toggles
+restoration in both host and attach. It is off by default and has no window to
+resize in detached headless startup. Host shell respawn uses `-R/--respawn`;
+`Ctrl+l r` remains the respawn toggle.
+
 When combined with `--restore`, geometry, `--cols` and `--rows` initialize the
 initially selected remote session first. Lingon waits for its resized grid, then
 restores the local window to that size and continues as an ordinary restore

@@ -55,6 +55,8 @@ func TestGeometryHostAndAttachCLI(t *testing.T) {
 	}{
 		{"host-geometry", false, []string{"-g", "100x50"}, 100, 50},
 		{"host-dimensions", false, []string{"--cols", "100", "--rows", "50"}, 100, 50},
+		{"host-geometry-then-restore", false, []string{"-r", "-g", "100x50"}, 100, 50},
+		{"host-dimensions-then-restore", false, []string{"--restore", "--cols", "100", "--rows", "50"}, 100, 50},
 		{"attach-geometry", true, []string{"-g", "100x50"}, 100, 50},
 		{"attach-dimensions", true, []string{"--cols", "100", "--rows", "50"}, 100, 50},
 		{"attach-geometry-then-restore", true, []string{"-r", "-g", "100x50", "--cols", "120", "--rows", "60"}, 100, 50},

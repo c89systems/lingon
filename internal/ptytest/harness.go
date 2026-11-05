@@ -454,6 +454,7 @@ func (h *Harness) startProxy() {
 
 // HostOptions configures a PTY-backed host session.
 type HostOptions struct {
+	Restore          bool
 	Respawn          bool
 	WorkingDirectory string
 	// ConfigDir and HeadlessExecutable isolate detached children created by UI tests.
@@ -557,7 +558,7 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 		hostCols, hostRows = opts.Geometry.Cols, opts.Geometry.Rows
 	}
 	resizeCh := make(chan struct{}, 1)
-	runner := session.New(session.Options{WorkingDirectory: opts.WorkingDirectory, Respawn: opts.Respawn,
+	runner := session.New(session.Options{WorkingDirectory: opts.WorkingDirectory, Respawn: opts.Respawn, Restore: opts.Restore,
 		ConfigDir:                   opts.ConfigDir,
 		HeadlessExecutable:          opts.HeadlessExecutable,
 		AllowRemoteResize:           opts.AllowRemoteResize,

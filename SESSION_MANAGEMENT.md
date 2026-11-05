@@ -184,6 +184,14 @@ relay waiters with an uncertain-outcome result. Queues, waiter counts and respon
 sizes are bounded, and a separate publisher worker keeps process startup outside
 the terminal input reader.
 
+## Window sizes
+
+Interactive host window restoration (`lingon -r/--restore`) keeps each local
+and attached tab's own dimensions. Switching tabs requests that tab's window
+size; manual resizing updates only the selected session. `Ctrl+l !` toggles
+restoration in host and attach. Shell respawn uses `-R/--respawn`; the interactive
+respawn shortcut remains `Ctrl+l r`.
+
 ## Verification
 
 The feature has unit coverage for validation, busy/conflicting requests, bounded

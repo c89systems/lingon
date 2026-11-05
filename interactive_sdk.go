@@ -41,6 +41,8 @@ type InteractiveOptions struct {
 	Logger                      pslog.Logger
 	Trace                       *trace.Writer
 	OnExit                      func(sessionID string, startedAt time.Time, err error)
+	// Restore follows each selected local or attached session's window size.
+	Restore bool
 }
 
 // Interactive starts a local interactive session and optionally publishes to the relay.
@@ -59,6 +61,7 @@ func Interactive(ctx context.Context, opts InteractiveOptions) error {
 		Shell:                       opts.Shell,
 		Term:                        opts.Term,
 		Respawn:                     opts.Respawn,
+		Restore:                     opts.Restore,
 		Offline:                     opts.Offline,
 		Theme:                       opts.Theme,
 		Publish:                     opts.Publish,

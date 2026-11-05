@@ -62,6 +62,7 @@ type Options struct {
 	Rows                  int
 	Shell                 string
 	Term                  string
+	Restore               bool
 	Respawn               bool
 	Offline               bool
 	Theme                 string
@@ -161,8 +162,10 @@ type Runner struct {
 	credentialMu sync.RWMutex
 	currentToken string
 
-	windowSizes  map[string]*terminal.WindowSizeRequest // protected by geometryMu
-	windowResize chan struct{}
+	windowRestore  *terminal.WindowRestore
+	windowObserved terminal.WindowSize                    // protected by geometryMu
+	windowSizes    map[string]*terminal.WindowSizeRequest // protected by geometryMu
+	windowResize   chan struct{}
 
 	management  *sessionmanage.Manager
 	opts        Options
@@ -252,12 +255,13 @@ func New(opts Options) *Runner {
 		Theme:    theme.TUI(resolveThemeName(opts.Theme)),
 	}})
 	return &Runner{
-		opts:         opts,
-		currentToken: opts.Token,
-		management:   sessionmanage.New(),
-		clock:        opts.Clock,
-		trace:        opts.Trace,
-		compositor:   compositor,
+		opts:          opts,
+		windowRestore: terminal.NewWindowRestore(opts.Restore),
+		currentToken:  opts.Token,
+		management:    sessionmanage.New(),
+		clock:         opts.Clock,
+		trace:         opts.Trace,
+		compositor:    compositor,
 	}
 }
 
@@ -456,6 +460,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 	if r.opts.Publish && !r.opts.DisableRemoteSessions {
 		r.remoteSessions = newRemoteManager(remoteOptions{
 			TextClipboard:               &r.textClipboard,
+			WindowRestore:               r.windowRestore,
 			Popup:                       r.popups.Frame,
 			Endpoint:                    r.opts.Endpoint,
 			Token:                       r.accessToken(),
@@ -864,6 +869,8 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 						r.createLocalSession(sigCtx, tokenRefresher, gate, stdout, stdin, debugRemoteInput)
 					case control.ActionScrollback:
 						r.enterScrollback(activeID, stdout, stdin)
+					case control.ActionToggleRestore:
+						r.toggleRestore(sigCtx, stdout)
 					case control.ActionToggleRespawn:
 						if !activeLocal {
 							r.showStatus("respawn toggle is local-only", stdout, 2*time.Second)
@@ -3391,6 +3398,10 @@ func (r *Runner) activateLocalSession(sessionID string, stdout, stdin *os.File) 
 		r.remoteSessions.Hide(activeID)
 	}
 	r.setActiveSession(sessionID, true)
+	if r.restoreEnabled() {
+		cols, rows := local.Size()
+		r.setTerminalGeometry(cols, rows)
+	}
 	r.resizePopup()
 	if request := r.windowRequest(sessionID); request != nil {
 		if size := request.Pending(); size.Cols > 0 && size.Rows > 0 {
@@ -3468,6 +3479,9 @@ func (r *Runner) takeControlLocal(local *localSession) {
 	}
 	local.takeControl()
 	cols, rows := r.terminalGeometry()
+	if r.restoreEnabled() {
+		cols, rows = local.Size()
+	}
 	if r.popups.Parent(local.ID()) != "" {
 		cols, rows = r.popupGeometry()
 	}

@@ -200,8 +200,7 @@ func sessionByID(sessions []SessionInfo, id string) (SessionInfo, bool) {
 
 // Run starts the multi-session attach client.
 func (m *MultiClient) Run(ctx context.Context) error {
-	restoreMode := newRestoreMode(m.Restore)
-	window := &restoreWindow{}
+	window := terminal.NewWindowRestore(m.Restore)
 	if m.Logger == nil {
 		m.Logger = logging.Default()
 	}
@@ -885,8 +884,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			tokenRefresher = m.refreshToken
 		}
 		client := &Client{
-			restoreMode:   restoreMode,
-			restoreWindow: window,
+			WindowRestore: window,
 			geometry:      geometry,
 			// Clear inherited screen contents only when presenting the first local
 			// view. Loading a different tab must preserve the display baseline.

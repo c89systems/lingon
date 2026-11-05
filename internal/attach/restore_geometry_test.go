@@ -26,11 +26,11 @@ func TestRestoreGeometryWaitsForRemoteGridAndDoesNotLeakToOtherTabs(t *testing.T
 	}
 	g.bindInitialSession("alpha")
 	var output bytes.Buffer
-	c := &Client{SessionID: "alpha", geometry: g, restoreMode: newRestoreMode(true), Clock: clock.NewMock(), Stdout: &output, TermSize: func() (int, int) { return 80, 24 }}
+	c := &Client{SessionID: "alpha", geometry: g, WindowRestore: terminal.NewWindowRestore(true), Clock: clock.NewMock(), Stdout: &output, TermSize: func() (int, int) { return 80, 24 }}
 	stop := c.startEffects(t.Context())
 	defer stop()
 	var other bytes.Buffer
-	b := &Client{SessionID: "beta", geometry: g, restoreMode: c.restoreMode, Clock: c.Clock, Stdout: &other, TermSize: c.TermSize}
+	b := &Client{SessionID: "beta", geometry: g, WindowRestore: c.WindowRestore, Clock: c.Clock, Stdout: &other, TermSize: c.TermSize}
 	stopOther := b.startEffects(t.Context())
 	defer stopOther()
 	// Switching while the initial connection is pending must neither move the
@@ -78,7 +78,7 @@ func TestRestoreGeometryDenialRestoresActualRemoteSize(t *testing.T) {
 	}
 	g.bindInitialSession("alpha")
 	var output bytes.Buffer
-	c := &Client{SessionID: "alpha", geometry: g, restoreMode: newRestoreMode(true), Clock: clock.NewMock(), Stdout: &output, viewOnly: true, TermSize: func() (int, int) { return 80, 24 }}
+	c := &Client{SessionID: "alpha", geometry: g, WindowRestore: terminal.NewWindowRestore(true), Clock: clock.NewMock(), Stdout: &output, viewOnly: true, TermSize: func() (int, int) { return 80, 24 }}
 	stop := c.startEffects(t.Context())
 	defer stop()
 	if err := c.applyGeometry(t.Context()); err != nil {
@@ -97,7 +97,7 @@ func TestRestoreGeometryAllowsManualResizeBeforeStartupAcknowledgement(t *testin
 	}
 	g.bindInitialSession("alpha")
 	var output bytes.Buffer
-	c := &Client{SessionID: "alpha", geometry: g, restoreMode: newRestoreMode(true), restoreLocal: terminal.WindowSize{Cols: 80, Rows: 24}, Clock: clock.NewMock(), Stdout: &output, TermSize: func() (int, int) { return 95, 25 }}
+	c := &Client{SessionID: "alpha", geometry: g, WindowRestore: terminal.NewWindowRestore(true), restoreLocal: terminal.WindowSize{Cols: 80, Rows: 24}, Clock: clock.NewMock(), Stdout: &output, TermSize: func() (int, int) { return 95, 25 }}
 	stop := c.startEffects(t.Context())
 	defer stop()
 	if err := c.processTerminalResize(t.Context(), false); err == nil {
@@ -144,7 +144,7 @@ func TestRestoreGeometryRechecksQueuedStartupSizeAtDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.bindInitialSession("alpha")
-	c := &Client{SessionID: "alpha", geometry: g, restoreMode: newRestoreMode(true), Clock: clock.NewMock()}
+	c := &Client{SessionID: "alpha", geometry: g, WindowRestore: terminal.NewWindowRestore(true), Clock: clock.NewMock()}
 	c.setWebSocket(ws)
 	c.writeMu.Lock()
 	done := make(chan error, 1)

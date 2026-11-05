@@ -39,7 +39,7 @@ func HelpLines(state State) []string {
 		"Ctrl+L [  scrollback (v visual lines; Space select; Space/Enter copy; PgUp/PgDn/w/s/u/d half page; Up/Down or j/k line; J/K five lines; h/l one col outside visual; H/L five cols; Home/End/g/G top/bottom; wheel scrolls; q leaves)",
 		"Ctrl+L r  toggle respawn",
 		"Ctrl+L 0  resize active headless to viewport",
-		"Ctrl+L !  toggle remote-size restore (attach only)",
+		"Ctrl+L !  toggle session-size restore",
 		"Ctrl+L o  toggle offline (host local-only)",
 		"Ctrl+L w  cycle inactivity wall",
 		"Ctrl+L n / p  next/prev tab (important tabs only in important mode)",

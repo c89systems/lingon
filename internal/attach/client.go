@@ -63,6 +63,9 @@ type Client struct {
 	RequestControl bool
 	// Restore requests that the local terminal follow remote viewport dimensions.
 	Restore bool
+	// WindowRestore shares physical-window restoration with an embedding host.
+	// When supplied, its mode takes precedence over Restore.
+	WindowRestore *terminal.WindowRestore
 	// Cols and Rows size the initial viewport before Restore follows session sizes.
 	Cols, Rows   int
 	HostnameOnly bool
@@ -108,8 +111,6 @@ type Client struct {
 	holderID string
 
 	mu                        sync.RWMutex
-	restoreMode               *atomic.Bool
-	restoreWindow             *restoreWindow
 	restoreOnce               sync.Once
 	geometry                  *clientGeometry
 	restoreRequest            restoreRequest // protected by renderMu
