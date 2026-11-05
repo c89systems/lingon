@@ -57,7 +57,11 @@ func TestScrollbackCopyPasteCLIAndProcessIsolation(t *testing.T) {
 			if !strings.HasPrefix(first, "ROW-") || !strings.HasPrefix(second, "ROW-") {
 				t.Fatalf("copy rows %q %q", first, second)
 			}
-			viewer.Send("j ")
+			finish := "\r"
+			if transport == "relay" {
+				finish = "\n"
+			}
+			viewer.Send("j" + finish)
 			popupScreen(t, viewer, func(s ptytest.Screen) bool {
 				return viewer.Snapshot().Cells[middle*100].Mode&terminal.ModeInverse == 0 && viewer.Cursor().Row == middle+2
 			})

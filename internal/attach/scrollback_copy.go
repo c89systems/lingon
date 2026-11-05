@@ -35,8 +35,8 @@ func (c *Client) SendTextPaste(ctx context.Context, text string) error {
 	return c.SendInput(ctx, terminal.TextPaste(text, snap.GetMode()))
 }
 
-// ScrollbackCopy toggles the visual cursor or advances the Space selection.
-func (c *Client) ScrollbackCopy(selectLines bool) {
+// ScrollbackCopy handles visual/selection keys and stores committed text.
+func (c *Client) ScrollbackCopy(key byte) {
 	clipboard := c.textClipboard()
 	c.scrollbackMu.Lock()
 	c.syncScrollbackLocked()
@@ -49,9 +49,7 @@ func (c *Client) ScrollbackCopy(selectLines bool) {
 		snap = c.snapshotOrBlank()
 	}
 	c.scrollbackView.SyncSource(mvu.ScrollbackSource{Position: c.scrollbackBuffer.Position(), HistoryRows: c.scrollbackBuffer.Len(), LiveRows: int(snap.GetRows()), ViewRows: c.scrollbackViewRows()})
-	if !selectLines {
-		c.scrollbackView.ToggleVisual()
-	} else if rows, copy := c.scrollbackView.SelectLines(); copy {
+	if rows, copy := c.scrollbackView.CopyKey(key); copy {
 		clipboard.Store(mvu.CopyScrollbackLines(mvu.NewProtoTextSource(c.scrollbackBuffer.Rows(), snap), rows))
 	}
 	c.scrollbackMu.Unlock()

@@ -889,8 +889,8 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 							half = 1
 						}
 						switch cmd {
-						case scrollVisual, scrollSelect:
-							r.scrollbackCopy(cmd == scrollSelect, stdout, stdin)
+						case scrollVisual, scrollSelect, scrollCopy:
+							r.scrollbackCopy(b, stdout, stdin)
 						case scrollPageUp:
 							r.scrollbackPage(1, half, stdout, stdin)
 						case scrollPageDown:

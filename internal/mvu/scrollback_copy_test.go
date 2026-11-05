@@ -18,6 +18,40 @@ func copyViewport() (ScrollbackViewport, ScrollbackSource) {
 	return v, source
 }
 
+func TestScrollbackCopyEnterCommitsOnlyExistingSelection(t *testing.T) {
+	for _, enter := range []byte{'\r', '\n'} {
+		for _, delta := range []int{-2, 2} {
+			v, _ := copyViewport()
+			before := v
+			if _, copied := v.CopyKey(enter); copied || v != before {
+				t.Fatal("Enter started selection or moved the visual cursor")
+			}
+			v.CopyKey(' ')
+			v.Page(30, 10, -delta, 1)
+			rows, copied := v.CopyKey(enter)
+			want := ScrollbackLineRange{First: min(14, 14+delta), Last: max(14, 14+delta)}
+			if !copied || rows != want || !v.Visual() || v.copy.selecting {
+				t.Fatalf("Enter %02x: range=%+v copied=%v view=%+v", enter, rows, copied, v)
+			}
+			before = v
+			for _, key := range []byte{'\r', '\n'} {
+				if _, copied := v.CopyKey(key); copied || v != before {
+					t.Fatal("another Enter restarted selection or copied again")
+				}
+			}
+			v.CopyKey(' ')
+			if rows, copied := v.CopyKey(' '); !copied || rows.First != rows.Last || v.copy.selecting {
+				t.Fatal("Space no longer copies a single-line selection")
+			}
+			v.CopyKey('v')
+			before = v
+			if _, copied := v.CopyKey(enter); copied || v != before {
+				t.Fatal("Enter entered visual mode")
+			}
+		}
+	}
+}
+
 func TestScrollbackVisualCursorNavigationAndSelection(t *testing.T) {
 	v, source := copyViewport()
 	if !v.Visual() || v.copy.cursor != 14 || v.Column() != 0 {

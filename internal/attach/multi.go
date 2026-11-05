@@ -2728,8 +2728,8 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					}
 					changed := false
 					switch cmd {
-					case scrollVisual, scrollSelect:
-						client.ScrollbackCopy(cmd == scrollSelect)
+					case scrollVisual, scrollSelect, scrollCopy:
+						client.ScrollbackCopy(b)
 						changed = true
 					case scrollPageUp:
 						changed = client.ScrollbackPage(1, half)

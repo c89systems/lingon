@@ -52,6 +52,22 @@ func (v *ScrollbackViewport) SyncSource(source ScrollbackSource) {
 // Visual reports whether scrollback's vertical copy cursor is active.
 func (v *ScrollbackViewport) Visual() bool { return v != nil && v.copy.visual }
 
+// CopyKey handles visual-copy input. Space starts or commits a selection;
+// Enter commits only an existing selection and leaves the visual cursor active.
+func (v *ScrollbackViewport) CopyKey(key byte) (ScrollbackLineRange, bool) {
+	switch key {
+	case 'v':
+		v.ToggleVisual()
+	case ' ':
+		return v.SelectLines()
+	case '\r', '\n':
+		if v.Visual() && v.copy.selecting {
+			return v.SelectLines()
+		}
+	}
+	return ScrollbackLineRange{}, false
+}
+
 // ToggleVisual enables a middle-left cursor, or cancels it and any selection.
 func (v *ScrollbackViewport) ToggleVisual() {
 	if v == nil || !v.active {

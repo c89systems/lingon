@@ -34,7 +34,7 @@ func HelpLines(state State) []string {
 		"Ctrl+L C  send Enter ~. (disconnect SSH)",
 		"Ctrl+L d  send Ctrl+D",
 		"Ctrl+L ]  paste copied text into focused terminal",
-		"Ctrl+L [  scrollback (v visual lines; Space select/copy; PgUp/PgDn/w/s/u/d half page; Up/Down or j/k line; J/K five lines; h/l one col outside visual; H/L five cols; Home/End/g/G top/bottom; wheel scrolls; q leaves)",
+		"Ctrl+L [  scrollback (v visual lines; Space select; Space/Enter copy; PgUp/PgDn/w/s/u/d half page; Up/Down or j/k line; J/K five lines; h/l one col outside visual; H/L five cols; Home/End/g/G top/bottom; wheel scrolls; q leaves)",
 		"Ctrl+L r  toggle respawn",
 		"Ctrl+L 0  resize active headless to viewport",
 		"Ctrl+L !  toggle remote-size restore (attach only)",

@@ -969,10 +969,10 @@ func (m *remoteManager) SetScrollbackActive(sessionID string, active bool) {
 	m.logViewState("scrollback_active", view, nil)
 }
 
-func (m *remoteManager) ScrollbackCopy(sessionID string, selectLines bool) {
+func (m *remoteManager) ScrollbackCopy(sessionID string, key byte) {
 	_, client := m.viewClient(sessionID)
 	if client != nil {
-		client.ScrollbackCopy(selectLines)
+		client.ScrollbackCopy(key)
 		client.RenderCurrent()
 	}
 }

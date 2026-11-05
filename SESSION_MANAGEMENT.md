@@ -82,10 +82,11 @@ In scrollback (`Ctrl+l [`), lowercase `v` enables a line-copy cursor at the
 middle-left of the viewport. Existing vertical navigation moves that cursor;
 the viewport scrolls when it reaches an edge. Horizontal movement is disabled
 in visual mode. Space starts an inclusive full-line selection, shown with
-inverted colors. Space again copies those lines and clears the selection while
+inverted colors. Space or Enter copies those lines and clears the selection while
 keeping the visual cursor. Live output continues without moving the selected
 rows. `v` cancels an unfinished selection and returns to ordinary scrollback;
-`q` leaves scrollback. Uppercase `V` is reserved.
+`q` leaves scrollback. Enter does nothing without an active selection; Space
+starts selection. Uppercase `V` is reserved.
 
 `Ctrl+l ]` pastes the copied text into the focused terminal. The clipboard is
 shared by tabs of that interactive Lingon process and lasts only in its memory;

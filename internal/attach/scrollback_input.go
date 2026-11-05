@@ -23,6 +23,7 @@ const (
 	scrollWheelDown
 	scrollVisual
 	scrollSelect
+	scrollCopy
 )
 
 type scrollInputState struct {
@@ -42,6 +43,8 @@ func (s *scrollInputState) feed(b byte) scrollCommand {
 			return scrollVisual
 		case ' ':
 			return scrollSelect
+		case '\r', '\n':
+			return scrollCopy
 		case 'q', 'Q':
 			s.reset()
 			return scrollExit

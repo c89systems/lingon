@@ -39,21 +39,26 @@ func scrollbackCopyFixture(t *testing.T, bracketed bool) (string, func(int), fun
 	}
 	script := fmt.Sprintf(`#!/bin/sh
 stty -echo
-if [ -f '%s' ]; then
+exec 3<&0
+read_paste() {
  stty raw -echo
  printf '%s\r\nSINK_READY\r\nHEX_BEGIN\r\n'
  od -v -An -tx1 -N%d
  printf '\r\nHEX_END\r\n'
  while IFS= read -r ignored; do :; done
+}
+if [ -f '%s' ]; then
+ read_paste
 else
  printf '\nREADY\n'
  i=0
  while IFS= read -r count; do
+  if [ "$count" -eq 0 ]; then read_paste <&3; fi
   end=$((i+count))
   while [ $i -lt $end ]; do i=$((i+1)); printf '\033[31mROW-%%03d\033[0m\n' "$i"; done
  done < '%s'
 fi
-`, flag, mode, count, fifo)
+`, mode, count, flag, fifo)
 	shell := filepath.Join(dir, "shell")
 	if err := os.WriteFile(shell, []byte(script), 0700); err != nil {
 		t.Fatal(err)
@@ -69,6 +74,82 @@ fi
 				t.Fatal(err)
 			}
 		}
+}
+
+func TestScrollbackEnterCopiesSelectionPTY(t *testing.T) {
+	for _, mode := range []string{"host", "single-attach", "attach", "remote-host"} {
+		for _, key := range []string{"\r", "\n"} {
+			t.Run(fmt.Sprintf("%s/key=%02x", mode, key[0]), func(t *testing.T) {
+				recorder := ptytest.NewWSRecorder()
+				h := ptytest.New(t, ptytest.WithClock(clock.NewMock()), ptytest.WithWSRecorder(recorder))
+				shell, emit, _ := scrollbackCopyFixture(t, false)
+				host := h.StartHost(ptytest.HostOptions{SessionID: "copy-enter", Shell: shell, Cols: 100, Rows: 20})
+				t.Cleanup(host.Cancel)
+				waitSearchScreen(t, host, func(s ptytest.Screen) bool { return s.Contains("READY") })
+				emit(120)
+				waitSearchScreen(t, host, func(s ptytest.Screen) bool { return s.Contains("ROW-120") })
+				waitRestoreHost(t, recorder, "copy-enter")
+				viewer := host
+				switch mode {
+				case "single-attach":
+					viewer = h.StartAttach(ptytest.AttachOptions{SessionID: "copy-enter", Cols: 100, Rows: 20, RequestControl: true})
+				case "attach":
+					viewer = h.StartMultiAttach(ptytest.MultiAttachOptions{SessionID: "copy-enter", Cols: 100, Rows: 20})
+				case "remote-host":
+					viewer = h.StartHost(ptytest.HostOptions{SessionID: "z-copy-enter-owner", Shell: searchShell(t), Cols: 100, Rows: 20})
+					waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
+						for _, name := range strings.Fields(s.Row(0)) {
+							if name == "copy-enter" {
+								return true
+							}
+						}
+						return false
+					})
+					viewer.Send("\x0c/copy-enter\r")
+				}
+				t.Cleanup(viewer.Cancel)
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("ROW-120") })
+				viewer.Send("\x0c[gv")
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return viewer.Cursor().Row == 10 && viewer.Cursor().Col == 1 })
+				// A cursor move fences Enter without starting a selection.
+				viewer.Send(key + "j")
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return viewer.Cursor().Row == 11 })
+				if viewer.Snapshot().Cells[10*100].Mode&terminal.ModeInverse != 0 {
+					t.Fatal("Enter started selection without Space")
+				}
+				viewer.Send("k jj")
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
+					return viewer.Cursor().Row == 12 && viewer.Snapshot().Cells[9*100].Mode&terminal.ModeInverse != 0
+				})
+				lines := []string{strings.TrimSpace(viewer.Screen().Row(9)), strings.TrimSpace(viewer.Screen().Row(10)), strings.TrimSpace(viewer.Screen().Row(11))}
+				for _, line := range lines {
+					if len(line) != 7 || !strings.HasPrefix(line, "ROW-") {
+						t.Fatalf("unexpected selected line %q", line)
+					}
+				}
+				viewer.Send(key + "j")
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return viewer.Cursor().Row == 13 })
+				for row := 9; row <= 12; row++ {
+					if viewer.Snapshot().Cells[row*100].Mode&terminal.ModeInverse != 0 {
+						t.Fatal("Enter did not copy and deselect")
+					}
+				}
+				viewer.Send(key + "k")
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return viewer.Cursor().Row == 12 })
+				if viewer.Snapshot().Cells[11*100].Mode&terminal.ModeInverse != 0 {
+					t.Fatal("Enter restarted selection after copying")
+				}
+				viewer.Send("q")
+				emit(0) // Switch the same owned application to a raw paste receiver.
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("SINK_READY") && !strings.Contains(s.Row(0), "%]") })
+				viewer.Send("\x0c]")
+				want := strings.Join(lines, "\r") + "\r"
+				if got := string(pastedHex(t, viewer)); got != want {
+					t.Fatalf("paste=%q, want %q", got, want)
+				}
+			})
+		}
+	}
 }
 
 func TestScrollbackVisualNavigationAndResizePTY(t *testing.T) {

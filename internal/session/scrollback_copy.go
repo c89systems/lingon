@@ -13,11 +13,11 @@ func (r *Runner) syncCopySourceLocked(frame localScrollbackSnapshot, rows int) {
 	r.scrollbackView.SyncSource(mvu.ScrollbackSource{Position: mvu.ScrollbackPosition{End: frame.end}, HistoryRows: len(frame.rows), LiveRows: int(frame.live.GetRows()), ViewRows: rows})
 }
 
-func (r *Runner) scrollbackCopy(selectLines bool, stdout, stdin *os.File) {
+func (r *Runner) scrollbackCopy(key byte, stdout, stdin *os.File) {
 	id, localFocus := r.focusedSession()
 	if !localFocus {
 		if r.remoteSessions != nil {
-			r.remoteSessions.ScrollbackCopy(id, selectLines)
+			r.remoteSessions.ScrollbackCopy(id, key)
 		}
 		return
 	}
@@ -38,9 +38,7 @@ func (r *Runner) scrollbackCopy(selectLines bool, stdout, stdin *os.File) {
 	}
 	r.syncCopySourceLocked(frame, rows)
 	r.scrollbackView.Normalize(len(frame.rows)+int(frame.live.Rows), rows, scrollbackContentWidthTerminal(frame.rows, frame.live), cols)
-	if !selectLines {
-		r.scrollbackView.ToggleVisual()
-	} else if selected, copy := r.scrollbackView.SelectLines(); copy {
+	if selected, copy := r.scrollbackView.CopyKey(key); copy {
 		r.textClipboard.Store(mvu.CopyScrollbackLines(mvu.NewTerminalTextSource(frame.rows, frame.live), selected))
 	}
 	r.scrollbackMu.Unlock()

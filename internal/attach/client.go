@@ -2635,8 +2635,8 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					}
 					changed := false
 					switch cmd {
-					case scrollVisual, scrollSelect:
-						c.ScrollbackCopy(cmd == scrollSelect)
+					case scrollVisual, scrollSelect, scrollCopy:
+						c.ScrollbackCopy(b)
 						changed = true
 					case scrollPageUp:
 						changed = c.scrollbackPage(1, half)

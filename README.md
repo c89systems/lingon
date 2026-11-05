@@ -326,11 +326,12 @@ rows. Press `q` or `Q` to return to the live screen.
 
 For line copying, press lowercase `v`. The cursor starts at the middle-left;
 vertical navigation moves it and scrolls the viewport only at its edges.
-Space starts a full-line selection in inverted colors. Space again copies the
+Space starts a full-line selection in inverted colors. Space or Enter copies the
 inclusive selection and clears its inversion, leaving the visual cursor active.
 `v` cancels an unfinished selection and returns to ordinary scrollback; `q`
 returns to the live screen. Uppercase `V` is reserved; horizontal movement is
-disabled while the visual cursor is active.
+disabled while the visual cursor is active. Enter without an active selection
+does nothing; use Space to start one.
 
 Press `Ctrl+l ]` to paste into the focused terminal, including a popup. The text
 clipboard is shared across tabs in this one interactive Lingon process, held
@@ -339,7 +340,7 @@ processes. Copy includes entire physical source rows, even when wider than the
 viewport, removes right-edge padding, and ends each row with a newline. Paste
 honors the destination application's bracketed-paste mode; otherwise row endings
 are sent as Enter. Starting or cancelling a new selection preserves the previous
-clipboard until the second Space commits a replacement.
+clipboard until Space or Enter commits a replacement.
 
 #### Find a session
 
