@@ -72,10 +72,6 @@ type localSession struct {
 	holderMu sync.Mutex
 	holderID string
 
-	veofMu   sync.Mutex
-	veofOrig uint8
-	veofSet  bool
-
 	lastActiveMu sync.RWMutex
 	lastActive   time.Time
 
@@ -1014,36 +1010,10 @@ func (s *localSession) writePTYWithMode(ctx context.Context, data []byte, disabl
 }
 
 func (s *localSession) sendRemoteEOF() error {
-	if err := s.writeMu.Lock(s.ctx); err != nil {
-		return err
-	}
-	defer s.writeMu.Unlock()
-
-	s.ptyMu.RLock()
-	ptyFile := s.pty
-	termiosFile := s.tty
-	if termiosFile == nil {
-		termiosFile = ptyFile
-	}
-	s.ptyMu.RUnlock()
-	if ptyFile == nil {
-		return errPTYNotReady
-	}
-
-	veof := byte(0x04)
-	s.veofMu.Lock()
-	if s.veofSet && s.veofOrig != 0 {
-		veof = s.veofOrig
-	}
-	s.veofMu.Unlock()
-	if termiosFile != nil {
-		_ = setVEOF(termiosFile, veof)
-		defer func() {
-			s.applyVEOF(s.holder())
-		}()
-	}
-
-	_, err := pty.NewWriter(ptyFile, s.clock).Write(s.ctx, []byte{veof})
+	// The application owns termios. PTY input may be processed after Write
+	// returns, so temporarily changing VEOF around a write cannot deliver EOF
+	// reliably. Explicit input bypasses filterRemoteInput instead.
+	_, err := s.writePTY([]byte{0x04})
 	return err
 }
 
@@ -1090,58 +1060,13 @@ func (s *localSession) filterRemoteInput(data []byte) []byte {
 func (s *localSession) setHolder(holderID string) {
 	s.holderMu.Lock()
 	defer s.holderMu.Unlock()
-	// Repeated host input must not rewrite termios while the shell is
-	// switching modes. Apply EOF policy only on an ownership transition.
+	// Only ownership transitions revoke queued clipboard operations. Terminal
+	// settings belong to the application, independent of the input holder.
 	if s.holderID == holderID {
 		return
 	}
 	s.holderID = holderID
 	s.clipboardHandler.Reset()
-	s.applyVEOF(holderID)
-}
-
-func (s *localSession) captureVEOF() {
-	s.ptyMu.RLock()
-	termiosFile := s.tty
-	if termiosFile == nil {
-		termiosFile = s.pty
-	}
-	s.ptyMu.RUnlock()
-	if termiosFile == nil {
-		return
-	}
-	val, err := getVEOF(termiosFile)
-	if err != nil {
-		return
-	}
-	s.veofMu.Lock()
-	s.veofOrig = val
-	s.veofSet = true
-	s.veofMu.Unlock()
-}
-
-func (s *localSession) applyVEOF(holderID string) {
-	s.ptyMu.RLock()
-	termiosFile := s.tty
-	if termiosFile == nil {
-		termiosFile = s.pty
-	}
-	s.ptyMu.RUnlock()
-	if termiosFile == nil {
-		return
-	}
-	s.veofMu.Lock()
-	if !s.veofSet {
-		s.veofMu.Unlock()
-		return
-	}
-	orig := s.veofOrig
-	s.veofMu.Unlock()
-	target := orig
-	if holderID != "" && holderID != publisher.HostControlID {
-		target = 0
-	}
-	_ = setVEOF(termiosFile, target)
 }
 
 func (s *localSession) enqueueRemoteInput(data []byte) error {
@@ -1263,7 +1188,6 @@ func (s *localSession) runOnce(ctx context.Context) error {
 	s.cmd = cmd
 	s.ptyMu.Unlock()
 
-	s.captureVEOF()
 	if ttyFile != nil {
 		_ = ttyFile.Close()
 		s.ptyMu.Lock()

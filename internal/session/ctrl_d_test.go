@@ -179,7 +179,7 @@ func TestAttachCtrlDDoesNotExitHost(t *testing.T) {
 			if err != nil {
 				return false
 			}
-			return veof == 0
+			return veof == 4
 		}, runErr, attachErr)
 	}
 
