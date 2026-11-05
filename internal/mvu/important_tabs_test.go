@@ -21,9 +21,13 @@ func TestImportantTabIdentityAndImmutableSnapshots(t *testing.T) {
 		t.Fatal("mark did not change the model, or requested a full redraw")
 	}
 	first := rt.Read()
-	if rt.ApplyAction(ImportantTabAction{SessionID: "a"}).Changed {
-		t.Fatal("marking twice toggled importance")
+	if !rt.ApplyAction(ImportantTabAction{SessionID: "a"}).Changed || rt.Read().ImportantTabs.Active() {
+		t.Fatal("toggling the last important tab did not leave the mode")
 	}
+	if !first.ImportantTabs.Contains("a") {
+		t.Fatal("toggle mutated an earlier frame snapshot")
+	}
+	rt.ApplyAction(ImportantTabAction{SessionID: "a"})
 	rt.ApplyAction(ImportantTabAction{SessionID: "b"})
 	if first.ImportantTabs.Contains("b") || !first.ImportantTabs.Contains("a") {
 		t.Fatal("a later mark mutated an earlier frame snapshot")
@@ -79,6 +83,13 @@ func TestImportantTabColorsAndSearchComposition(t *testing.T) {
 			}
 			state := rt.Read()
 			state.ActiveTab = 2
+			focus := importantTabScreen(t, state)
+			if focus.Cells[11].Mode&(terminal.ModeBold|terminal.ModeUnderline) != terminal.ModeBold|terminal.ModeUnderline {
+				t.Fatal("active unimportant tab has no focus cue")
+			}
+			if focus.Cells[1].Mode&(terminal.ModeBold|terminal.ModeUnderline) != 0 {
+				t.Fatal("focus styling leaked onto an inactive important tab")
+			}
 			state.Search = SearchState{Visible: true, Text: "th", Ghost: "ree", CandidateID: "c"}
 			search := importantTabScreen(t, state)
 			if search.Cells[10].Rune != '[' || search.Cells[16].Rune != ']' || search.Cells[11].BG == baseline.Cells[11].BG {
@@ -92,6 +103,50 @@ func TestImportantTabColorsAndSearchComposition(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestImportantTabCyclingAndToggle(t *testing.T) {
+	sources := []SessionTabSource{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
+	rt := NewRuntime()
+	rt.ApplyAction(ImportantTabAction{SessionID: "a"})
+	rt.ApplyAction(ImportantTabAction{SessionID: "c"})
+	for _, tc := range []struct {
+		current string
+		dir     int
+		want    string
+	}{
+		{"a", 1, "c"}, {"c", 1, "a"}, {"a", -1, "c"}, {"c", -1, "a"},
+		{"b", 1, "c"}, {"b", -1, "a"}, {"d", 1, "a"}, {"d", -1, "c"},
+	} {
+		if got := rt.Read().ImportantTabs.NextSessionID(sources, tc.current, tc.dir); got != tc.want {
+			t.Fatalf("%s/%d: got %s, want %s", tc.current, tc.dir, got, tc.want)
+		}
+	}
+	rt.ApplyAction(ImportantTabAction{SessionID: "c"})
+	if got := rt.Read().ImportantTabs.NextSessionID(sources, "a", 1); got != "a" {
+		t.Fatalf("single mark: got %s", got)
+	}
+	if got := rt.Read().ImportantTabs.NextSessionID(sources[1:], "b", 1); got != "b" {
+		t.Fatalf("absent marked session: got %s", got)
+	}
+	rt.ApplyAction(ImportantTabAction{SessionID: "a"})
+	if got := rt.Read().ImportantTabs.NextSessionID(sources, "a", 1); got != "b" {
+		t.Fatalf("last toggle failed to restore normal cycling: %s", got)
+	}
+}
+
+func TestImportantActiveUnavailableTabKeepsFocusCue(t *testing.T) {
+	for _, muted := range []bool{false, true} {
+		rt := NewRuntime()
+		rt.ApplyAction(ImportantTabAction{SessionID: "a"})
+		state := rt.Read()
+		state.Tabs = []Tab{{ID: "a", Title: "one"}, {ID: "b", Title: "two", Disabled: !muted, Muted: muted}, {ID: "c", Title: "three"}}
+		state.ActiveTab = 1
+		focused := importantTabScreen(t, state).Cells[6]
+		if focused.Mode&(terminal.ModeBold|terminal.ModeUnderline|terminal.ModeItalic) != terminal.ModeBold|terminal.ModeUnderline|terminal.ModeItalic || focused.Mode&terminal.ModeFaint != 0 {
+			t.Fatalf("unavailable active focus styling: %+v", focused)
+		}
 	}
 }
 

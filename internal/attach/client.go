@@ -2490,7 +2490,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return false
 				}
 				switch action {
-				case control.ActionMarkImportant, control.ActionResetImportant:
+				case control.ActionToggleImportant, control.ActionResetImportant:
 					c.applyCompositorAction(mvu.ImportantTabAction{SessionID: c.SessionID, Reset: action == control.ActionResetImportant})
 					c.renderCurrent()
 					return true

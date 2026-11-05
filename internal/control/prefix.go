@@ -55,8 +55,8 @@ const (
 	ActionSSHDisconnect
 	// ActionPasteText pastes the process-local scrollback text clipboard.
 	ActionPasteText
-	// ActionMarkImportant marks the current parent tab as important.
-	ActionMarkImportant
+	// ActionToggleImportant toggles the current parent tab importance.
+	ActionToggleImportant
 	// ActionResetImportant leaves important-tab mode and clears all marks.
 	ActionResetImportant
 	// ActionSearchImportant searches important tabs, or all tabs outside that mode.
@@ -126,7 +126,7 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 		case '?':
 			return ActionSearchImportant, nil
 		case 'i', 0x09: // Ctrl+I (Tab)
-			return ActionMarkImportant, nil
+			return ActionToggleImportant, nil
 		case 'I':
 			return ActionResetImportant, nil
 		case '!':

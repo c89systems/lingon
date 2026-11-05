@@ -2120,7 +2120,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		current = popupTabs(current, &popups)
 		active := activeID
 		mu.Unlock()
-		next := mvu.NextSessionID(mvu.SessionTabSourcesFrom(current), active, delta)
+		next := ui.Read().ImportantTabs.NextSessionID(mvu.SessionTabSourcesFrom(current), active, delta)
 		if next != active && next != "" {
 			return next, active
 		}
@@ -2140,7 +2140,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			current = popupTabs(current, &popups)
 			active = activeID
 			mu.Unlock()
-			next = mvu.NextSessionID(mvu.SessionTabSourcesFrom(current), active, delta)
+			next = ui.Read().ImportantTabs.NextSessionID(mvu.SessionTabSourcesFrom(current), active, delta)
 		}
 		return next, active
 	}
@@ -2397,7 +2397,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 						renderActiveCurrent()
 					}
 					return true
-				case control.ActionMarkImportant, control.ActionResetImportant:
+				case control.ActionToggleImportant, control.ActionResetImportant:
 					mu.Lock()
 					parent := activeID
 					mu.Unlock()

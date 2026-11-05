@@ -453,7 +453,8 @@ func DrawTabBar(w *bytes.Buffer, in TabBarInput) {
 	for i := start; i < len(tabs); i++ {
 		tab := tabs[i]
 		colors := normal
-		if in.Important.Active() && !in.Important.Contains(tab.ID) {
+		unimportant := in.Important.Active() && !in.Important.Contains(tab.ID)
+		if unimportant {
 			colors = ui.DimmedTabs
 		}
 		remain := cols - col + 1
@@ -464,8 +465,12 @@ func DrawTabBar(w *bytes.Buffer, in TabBarInput) {
 		w.WriteString("\x1b[1;")
 		w.WriteString(itoa(col))
 		w.WriteString("H")
-		dim := tab.Disabled || tab.Muted
+		focusedUnimportant := unimportant && i == active
+		dim := (tab.Disabled || tab.Muted) && !focusedUnimportant
 		italic := tab.Disabled || tab.Muted
+		if focusedUnimportant {
+			w.WriteString("\x1b[1;4m")
+		}
 		if dim {
 			w.WriteString("\x1b[2m")
 		}

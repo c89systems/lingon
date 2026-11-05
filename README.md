@@ -367,13 +367,20 @@ the window.
 
 #### Mark important tabs
 
-In the interactive host or `lingon attach`, `Ctrl+l i` marks the current tab
-as important. `Ctrl+l Ctrl+i` is an alias (the second key is also Tab). The first
+In the interactive host or `lingon attach`, `Ctrl+l i` toggles whether the current
+tab is important. `Ctrl+l Ctrl+i` is an alias (the second key is also Tab). The first
 mark enters important-tab mode: the bar and unmarked tabs use a darker variant
 of the selected theme, while marked tabs keep their normal colors. The active
-tab remains distinguishable in either group. Marking more tabs adds them to the
-set; marking an already important tab leaves it marked. `Ctrl+l I` clears every
-mark and restores the normal bar.
+non-important tab has a brighter background and readable text, with bold and
+underline to make focus clear. Inactive non-important tabs stay dark. Marking an
+already important tab removes its mark; removing the last mark leaves the mode.
+`Ctrl+l I` clears every mark and restores the normal bar.
+
+While important mode is active, `Ctrl+l n` and `Ctrl+l p` cycle only marked tabs
+(also `Ctrl+l Ctrl+n` / `Ctrl+l Ctrl+p`). From an unmarked tab they select the
+next or previous marked tab in the full tab order. A single remaining important
+tab stays selected; if no marked tabs are present, cycling keeps the current
+session. Resetting the mode restores ordinary cycling through all tabs.
 
 `Ctrl+l ?` opens the same search field as `/`, limited to important tabs while
 this mode is active. Tab and Shift+Tab cycle through marked tabs relative to the

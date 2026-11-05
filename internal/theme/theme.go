@@ -253,9 +253,14 @@ func tokensFromColors(c colorTokens) Tokens {
 }
 
 func tuiFromColors(c colorTokens) TUITheme {
-	dimBg, dimActiveBg := darken(c.tabBg, 0.65), darken(c.tabActiveBg, 0.65)
+	dimBg, dimActiveBg := darken(c.tabBg, 0.65), darken(c.tabActiveBg, 0.20)
+	// Dark blues can remain indistinguishable even after reducing dimming.
+	// Lift the focused background just enough to separate it from the bar.
+	for contrastRatio(dimActiveBg, dimBg) < 1.6 {
+		dimActiveBg = lighten(dimActiveBg, 0.05)
+	}
 	dimFg := ensureContrast(darken(c.tabFg, 0.45), dimBg, 3)
-	dimActiveFg := ensureContrast(darken(c.tabActiveFg, 0.45), dimActiveBg, 3)
+	dimActiveFg := ensureContrast(c.tabActiveFg, dimActiveBg, 4.5)
 	return TUITheme{
 		DialogBg:         c.dialogBg.ANSIBg(),
 		DialogFg:         c.dialogFg.ANSIFg(),
@@ -273,7 +278,7 @@ func tuiFromColors(c colorTokens) TUITheme {
 			Bg: dimBg.ANSIBg(), Fg: dimFg.ANSIFg(),
 			ActiveBg: dimActiveBg.ANSIBg(), ActiveFg: dimActiveFg.ANSIFg(),
 			MutedFg:       ensureContrast(darken(c.tabMutedFg, 0.45), dimBg, 3).ANSIFg(),
-			MutedActiveFg: ensureContrast(darken(c.tabMutedActiveFg, 0.45), dimActiveBg, 3).ANSIFg(),
+			MutedActiveFg: ensureContrast(c.tabMutedActiveFg, dimActiveBg, 4.5).ANSIFg(),
 		},
 		Reset: "\x1b[0m",
 	}

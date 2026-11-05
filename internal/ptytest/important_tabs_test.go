@@ -88,14 +88,27 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			if mode == "attach" && !sameTabColor(importantTabColor(host, "alpha-3"), inactive) {
 				t.Fatal("marks leaked into the host UI")
 			}
-			viewer.Send("\x0cn")
+			viewer.Send("\x0c/alpha-2\r")
 			settle()
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
 				return s.Contains("REPLY:tab-2") && importantTabColor(viewer, "alpha-2").BG != active.BG
 			})
-			viewer.Send("\x0c\x09") // Ctrl+L Ctrl+I
+			// The local search field fences the complete frame, without advancing
+			// time or depending on more application output to reveal focus.
+			viewer.Send("\x0c/")
+			searchField(t, viewer, "/")
+			focused := importantTabColor(viewer, "alpha-2")
+			unfocused := importantTabColor(viewer, "alpha-3")
+			focusMode := terminal.ModeBold | terminal.ModeUnderline
+			if focused.Mode&focusMode != focusMode || unfocused.Mode&focusMode != 0 {
+				t.Fatalf("active unimportant tab has no distinct focus cue: active=%+v inactive=%+v", focused, unfocused)
+			}
+			if focused.BG == unfocused.BG {
+				t.Fatal("active unimportant tab uses the inactive background")
+			}
+			viewer.Send("\x1b\x0c\x09") // Cancel search, Ctrl+L Ctrl+I.
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return sameTabColor(importantTabColor(viewer, "alpha-2"), active) })
-			viewer.Send("\x0ci\x0c?\t") // Idempotent mark, then next marked tab.
+			viewer.Send("\x0c?\t") // Next important tab from alpha-2.
 			searchField(t, viewer, "/ alpha")
 			viewer.Send("\t")
 			searchField(t, viewer, "/ alpha-2")
@@ -141,6 +154,59 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			searchField(t, viewer, "/ alpha-3")
 			viewer.Send("\x1b\x0cI")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return sameTabColor(importantTabColor(viewer, "alpha"), inactive) })
+		})
+	}
+}
+
+func TestImportantTabToggleAndNavigationPTY(t *testing.T) {
+	for _, useAttach := range []bool{false, true} {
+		t.Run(fmt.Sprint(useAttach), func(t *testing.T) {
+			viewer, settle := overflowSearchTerminal(t, useAttach)
+			viewer.Send("\x0ci\x0c/alpha-4\r")
+			if useAttach {
+				settle()
+			}
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:tab-4") })
+			viewer.Send("\x0ci\x0c/alpha-3\r")
+			if useAttach {
+				settle()
+			}
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:tab-3") })
+			for i, step := range []struct {
+				keys string
+				tab  int
+			}{
+				{"\x0cn", 4}, {"\x0cp", 1}, {"\x0c\x0e", 4}, {"\x0c\x10", 1},
+			} {
+				fence := fmt.Sprintf("cycle-fence-%d", i)
+				viewer.DrainRaw()
+				viewer.Send(step.keys + fence + "\r")
+				waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:" + fence) })
+				if !viewer.Screen().Contains(fmt.Sprintf("REPLY:tab-%d", step.tab)) {
+					t.Fatalf("%q selected wrong tab:\n%s", step.keys, viewer.Screen().String())
+				}
+				if strings.Contains(viewer.DrainRaw(), "\x1b[2J") {
+					t.Fatal("restricted cycling cleared the screen")
+				}
+			}
+			// Unmark alpha, leaving alpha-4 as the sole important tab.
+			viewer.Send("\x0ci\x0cnone-important\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:one-important") })
+			if !viewer.Screen().Contains("REPLY:tab-4") {
+				t.Fatal("toggle failed to remove alpha from cycling")
+			}
+			viewer.Send("\x0cpstill-four\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool {
+				return s.Contains("REPLY:still-four") && s.Contains("REPLY:one-important")
+			})
+			// Removing the last mark restores normal cycling automatically.
+			viewer.Send("\x0c\x09\x0cnnormal-next\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:normal-next") })
+			if !viewer.Screen().Contains("REPLY:tab-5") {
+				t.Fatal("last toggle did not leave important mode")
+			}
+			viewer.Send("\x0ci\x0cI\x0cnreset-next\r")
+			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:reset-next") && s.Contains("REPLY:tab-6") })
 		})
 	}
 }

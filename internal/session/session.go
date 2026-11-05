@@ -722,7 +722,7 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 					}
 					r.setTabSuppressed(activeID, false)
 					switch action {
-					case control.ActionMarkImportant, control.ActionResetImportant:
+					case control.ActionToggleImportant, control.ActionResetImportant:
 						parent, _ := r.activeSession()
 						r.runtime().ApplyAction(mvu.ImportantTabAction{SessionID: parent, Reset: action == control.ActionResetImportant})
 						r.forceRedraw(stdout)
@@ -3271,7 +3271,7 @@ func (r *Runner) switchTab(ctx context.Context, dir int, stdout, stdin *os.File)
 		return
 	}
 	activeID, _ := r.activeSession()
-	nextID := mvu.NextSessionID(mvu.SessionTabSourcesFrom(sessions), activeID, dir)
+	nextID := r.runtime().Read().ImportantTabs.NextSessionID(mvu.SessionTabSourcesFrom(sessions), activeID, dir)
 	if r.trace != nil {
 		r.trace.Event("tab_switch", map[string]any{
 			"component":   "host",

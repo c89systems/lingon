@@ -17,7 +17,7 @@ func TestImportantTabsDimThemeColors(t *testing.T) {
 	}
 	for _, name := range Names() {
 		ui := TUI(name)
-		for _, pair := range [][2]string{{ui.TabBg, ui.DimmedTabs.Bg}, {ui.TabActiveBg, ui.DimmedTabs.ActiveBg}} {
+		for _, pair := range [][2]string{{ui.TabBg, ui.DimmedTabs.Bg}} {
 			if luminance(color(pair[1])) >= luminance(color(pair[0])) {
 				t.Fatalf("%s: important-mode background/foreground is not darker", name)
 			}
@@ -29,6 +29,14 @@ func TestImportantTabsDimThemeColors(t *testing.T) {
 		}
 		if ui.DimmedTabs.Bg == ui.DimmedTabs.ActiveBg {
 			t.Fatalf("%s: dimming removed active-tab distinction", name)
+		}
+		if contrastRatio(color(ui.DimmedTabs.ActiveBg), color(ui.DimmedTabs.Bg)) < 1.5 {
+			t.Fatalf("%s: active unimportant background blends into inactive tabs", name)
+		}
+		for _, fg := range []string{ui.DimmedTabs.ActiveFg, ui.DimmedTabs.MutedActiveFg} {
+			if contrastRatio(color(fg), color(ui.DimmedTabs.ActiveBg)) < 4.5 {
+				t.Fatalf("%s: active unimportant text has insufficient contrast", name)
+			}
 		}
 	}
 }

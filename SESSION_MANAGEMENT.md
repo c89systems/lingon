@@ -95,14 +95,19 @@ newline. Paste honors the destination application's bracketed-paste mode.
 
 Important-tab marks are UI-local, keyed by immutable session ID and shared by
 the local and remote tabs displayed in that UI. `Ctrl+l i` (also
-`Ctrl+l Ctrl+i`) adds the parent tab to the set; `Ctrl+l I` resets it. Unmarked
-tabs and the bar use the selected theme's darker terminal palette, preserving
-the active-tab style and search brackets. `Ctrl+l ?` restricts suggestions and
-Tab/Shift+Tab cycling to marked IDs, retaining the current tab's place in the
+`Ctrl+l Ctrl+i`) toggles the parent tab in the set; `Ctrl+l I` resets it. Removing
+the last mark leaves the mode. Unmarked tabs and the bar use the selected theme's
+darker terminal palette, preserving
+the active-tab style and search brackets. The active unmarked tab uses a brighter
+background, stronger text contrast, bold and underline. `Ctrl+l n/p` and their
+control-key aliases cycle only marked IDs while important mode is active.
+`Ctrl+l ?` restricts suggestions and Tab/Shift+Tab cycling to marked IDs,
+retaining the current tab's place in the
 full tab order as the cycling origin. It searches all tabs when the mode is
 inactive; `/` always searches all tabs. Rename and reconnect do not alter marks.
-Removed IDs do not transfer their marks to a new session with the same name;
-only explicit reset or exiting the UI clears the set. Neither the backend nor
+Removed IDs do not transfer their marks to a new session with the same name.
+Marks can be toggled individually or cleared with reset; exiting the UI discards
+them. Neither the backend nor
 Android/Web clients store this UI preference.
 
 ## Identity and retries

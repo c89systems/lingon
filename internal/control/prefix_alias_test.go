@@ -14,7 +14,7 @@ func TestPrefixControlAliases(t *testing.T) {
 		{"previous", 0x10, 'p', ActionPrevTab},
 		{"theme", 0x14, 't', ActionNextTheme},
 		{"paste-text", ']', ']', ActionPasteText},
-		{"important", 0x09, 'i', ActionMarkImportant},
+		{"important", 0x09, 'i', ActionToggleImportant},
 		{"reset-important", 'I', 'I', ActionResetImportant},
 		{"search-important", '?', '?', ActionSearchImportant},
 	} {
