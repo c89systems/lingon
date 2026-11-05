@@ -189,3 +189,29 @@ func TestManagementRejectsClientFramesOfflineAndStaleHosts(t *testing.T) {
 		t.Fatal("stale host renamed metadata")
 	}
 }
+
+func TestDirectoryManagementRequiresSessionOwner(t *testing.T) {
+	store := NewStore()
+	hub := NewHub(nil)
+	server := NewHTTPServer(store, nil, nil, nil, hub)
+	store.CreateSession(Session{ID: "host", Username: "owner"})
+	owner, _ := store.CreateAccessToken("owner", time.Hour, time.Now())
+	other, _ := store.CreateAccessToken("other", time.Hour, time.Now())
+	for _, kind := range []string{"directory", "chdir"} {
+		data, _ := json.Marshal(sessionmanage.Request{RequestID: "directory-owner", SessionID: "host", Kind: kind, Path: "/owner"})
+		for _, tc := range []struct {
+			token, share string
+			status       int
+		}{{"", "", 401}, {other.Token, "", 403}, {owner.Token, "true", 403}} {
+			req := httptest.NewRequest(http.MethodPost, "/sessions/manage", bytes.NewReader(data))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+			req.Header.Set("X-Lingon-Share-Session", tc.share)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, req)
+			if response.Code != tc.status {
+				t.Fatalf("%s: status %d want %d", kind, response.Code, tc.status)
+			}
+		}
+	}
+}

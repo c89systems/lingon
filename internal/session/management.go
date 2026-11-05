@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"pkt.systems/lingon/internal/config"
 	"pkt.systems/lingon/internal/headless"
@@ -14,6 +16,21 @@ import (
 
 // Manage executes an owner-authorized lifecycle operation on a local session.
 func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionmanage.Result {
+	if req.Kind == "directory" {
+		if err := sessionmanage.Validate(req); err != nil {
+			return sessionmanage.Result{Error: err.Error()}
+		}
+		local := r.localSession(req.SessionID)
+		if local == nil {
+			return sessionmanage.Result{Error: "session is unavailable on this host"}
+		}
+		result, err := local.directory.Complete(ctx, req.Path)
+		result.SessionID = req.SessionID
+		if err != nil {
+			result.Error = err.Error()
+		}
+		return result
+	}
 	if req.Kind == "rename" {
 		req.Name = sessionmanage.NormalizeName(req.Name)
 	}
@@ -21,6 +38,13 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 		local := r.localSession(req.SessionID)
 		if local == nil {
 			return sessionmanage.Result{Error: "session is unavailable on this host"}
+		}
+		if req.Kind == "chdir" {
+			path, err := local.directory.Change(ctx, req.Path)
+			if err != nil {
+				return sessionmanage.Result{Error: err.Error()}
+			}
+			return sessionmanage.Result{SessionID: local.ID(), Path: path}
 		}
 		if req.Kind == "close" {
 			// Commit the close after the transport has written its acknowledgement.
@@ -55,6 +79,10 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 		if cfg == "" {
 			cfg = config.DefaultConfigDir()
 		}
+		cfg, err := filepath.Abs(cfg)
+		if err != nil {
+			return sessionmanage.Result{Error: err.Error()}
+		}
 		records, err := headless.NewStore(cfg).Reconcile()
 		if err != nil {
 			return sessionmanage.Result{Error: err.Error()}
@@ -75,11 +103,25 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 		if r.opts.Shell != "" {
 			args = append(args, "--shell", r.opts.Shell)
 		}
+		// Resolve host configuration paths before launching from a different directory.
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "--config" || (args[i] == "--shell" && strings.ContainsRune(args[i+1], filepath.Separator)) {
+				absolute, err := filepath.Abs(args[i+1])
+				if err != nil {
+					return sessionmanage.Result{Error: err.Error()}
+				}
+				args[i+1] = absolute
+			}
+		}
 		var launchToken string
 		if r.opts.Endpoint != "" && r.opts.Publish {
 			args = append(args, "--endpoint", r.opts.Endpoint)
 			if r.opts.AuthFile != "" {
-				args = append(args, "--auth-file", r.opts.AuthFile)
+				authPath, err := filepath.Abs(r.opts.AuthFile)
+				if err != nil {
+					return sessionmanage.Result{Error: err.Error()}
+				}
+				args = append(args, "--auth-file", authPath)
 			} else {
 				launchToken = r.accessToken()
 				if local.publisher != nil {
@@ -95,9 +137,17 @@ func (r *Runner) Manage(ctx context.Context, req sessionmanage.Request) sessionm
 		}
 		var env []string
 		if r.opts.TLSDir != "" {
-			env = append(env, "LINGON_SERVER_TLS_DIR="+r.opts.TLSDir)
+			tlsPath, err := filepath.Abs(r.opts.TLSDir)
+			if err != nil {
+				return sessionmanage.Result{Error: err.Error()}
+			}
+			env = append(env, "LINGON_SERVER_TLS_DIR="+tlsPath)
 		}
-		_, err = headless.Launch(ctx, headless.LaunchRequest{Executable: r.opts.HeadlessExecutable, ConfigDir: cfg, SessionID: id, Args: args, Env: env, Token: launchToken})
+		directory, err := local.directory.Path()
+		if err != nil {
+			return sessionmanage.Result{Error: err.Error()}
+		}
+		_, err = headless.Launch(ctx, headless.LaunchRequest{WorkingDirectory: directory, Executable: r.opts.HeadlessExecutable, ConfigDir: cfg, SessionID: id, Args: args, Env: env, Token: launchToken})
 		if err != nil {
 			return sessionmanage.Result{Error: err.Error()}
 		}
@@ -131,7 +181,7 @@ func (m *remoteManager) Manage(ctx context.Context, req sessionmanage.Request) s
 	if err != nil {
 		result.Error = err.Error()
 	}
-	if err == nil {
+	if err == nil && req.Kind != "directory" && req.Kind != "chdir" {
 		_ = m.Refresh(ctx)
 	}
 	return result

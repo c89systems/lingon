@@ -1,2 +1,2 @@
-// Package sessionmanage defines bounded, idempotent session lifecycle operations.
+// Package sessionmanage defines bounded session lifecycle and launch-directory management.
 package sessionmanage

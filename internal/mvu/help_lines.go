@@ -26,6 +26,7 @@ func HelpLines(state State) []string {
 		"Ctrl+L j  show/hide popup terminal",
 		"Ctrl+L J  terminate popup terminal",
 		"Ctrl+L e  rename session",
+		"Ctrl+L f  working directory (directories only; Tab/Shift+Tab cycle, Enter saves, Esc cancels)",
 		"Ctrl+L /  find session (Tab/Shift+Tab cycle, Enter opens, Esc cancels)",
 		"Ctrl+L ?  find important session (all sessions if none marked)",
 		"Ctrl+L i (or Ctrl+L Ctrl+I)  important tabs (Tab adds, Ctrl+W deletes name, Enter toggles, Esc cancels); Ctrl+L I resets",

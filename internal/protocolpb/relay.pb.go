@@ -1901,6 +1901,8 @@ type SessionManagement struct {
 	Completed       bool                   `protobuf:"varint,7,opt,name=completed,proto3" json:"completed,omitempty"`
 	Cols            uint32                 `protobuf:"varint,8,opt,name=cols,proto3" json:"cols,omitempty"`
 	Rows            uint32                 `protobuf:"varint,9,opt,name=rows,proto3" json:"rows,omitempty"`
+	Path            string                 `protobuf:"bytes,10,opt,name=path,proto3" json:"path,omitempty"`
+	Directories     []string               `protobuf:"bytes,11,rep,name=directories,proto3" json:"directories,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1996,6 +1998,20 @@ func (x *SessionManagement) GetRows() uint32 {
 		return x.Rows
 	}
 	return 0
+}
+
+func (x *SessionManagement) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *SessionManagement) GetDirectories() []string {
+	if x != nil {
+		return x.Directories
+	}
+	return nil
 }
 
 var File_internal_protocolpb_relay_proto protoreflect.FileDescriptor
@@ -2139,7 +2155,7 @@ const file_internal_protocolpb_relay_proto_rawDesc = "" +
 	"\rSessionClosed\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\n" +
 	"\n" +
-	"\bActivity\"\x89\x02\n" +
+	"\bActivity\"\xbf\x02\n" +
 	"\x11SessionManagement\x12%\n" +
 	"\x0ecorrelation_id\x18\x01 \x01(\tR\rcorrelationId\x12\x1d\n" +
 	"\n" +
@@ -2150,7 +2166,10 @@ const file_internal_protocolpb_relay_proto_rawDesc = "" +
 	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1c\n" +
 	"\tcompleted\x18\a \x01(\bR\tcompleted\x12\x12\n" +
 	"\x04cols\x18\b \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\t \x01(\rR\x04rows*\xb0\x01\n" +
+	"\x04rows\x18\t \x01(\rR\x04rows\x12\x12\n" +
+	"\x04path\x18\n" +
+	" \x01(\tR\x04path\x12 \n" +
+	"\vdirectories\x18\v \x03(\tR\vdirectories*\xb0\x01\n" +
 	"\vCommandKind\x12\x1c\n" +
 	"\x18COMMAND_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15COMMAND_KIND_SEND_EOF\x10\x01\x12\x1f\n" +

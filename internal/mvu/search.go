@@ -12,6 +12,7 @@ import (
 type SearchState struct {
 	Visible, Important bool
 	Text, Ghost        string
+	Label, Hint        string
 	CandidateID        string
 }
 
@@ -27,19 +28,26 @@ func searchCursor(search SearchState, cols, rows int, cursor Cursor) Cursor {
 	if !search.Visible || cols < 1 || rows < 1 {
 		return cursor
 	}
-	col := 3 + runewidth.StringWidth(search.Text)
+	col := 1 + runewidth.StringWidth(searchPrefix(search)+search.Text)
 	if col > cols {
 		col = cols
 	}
 	return Cursor{Row: rows, Col: col, Visible: true}
 }
 
-func searchText(search SearchState, cols int) string {
+func searchPrefix(search SearchState) string {
+	if search.Label != "" {
+		return search.Label
+	}
 	prefix := "/ "
 	if search.Important {
 		prefix = "i "
 	}
-	line := prefix + search.Text
+	return prefix
+}
+
+func searchText(search SearchState, cols int) string {
+	line := searchPrefix(search) + search.Text
 	// Keep the insertion point and the tail of long names in view.
 	if width := runewidth.StringWidth(line); width >= cols {
 		line = runewidth.TruncateLeft(line, width-cols+1, "")
@@ -57,7 +65,11 @@ func drawSearch(buf *bytes.Buffer, cols, rows int, search SearchState) {
 	remaining := cols - runewidth.StringWidth(text)
 	if remaining > 0 {
 		buf.WriteString("\x1b[90m")
-		buf.WriteString(runewidth.Truncate(search.Ghost, remaining, ""))
+		suffix := search.Ghost
+		if search.Hint != "" {
+			suffix += " (" + search.Hint + ")"
+		}
+		buf.WriteString(runewidth.Truncate(suffix, remaining, ""))
 	}
 	buf.WriteString("\x1b[0m")
 }

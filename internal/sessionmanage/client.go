@@ -36,7 +36,7 @@ func Call(ctx context.Context, client *http.Client, endpoint, token string, req 
 	}
 	defer resp.Body.Close()
 	var result Result
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
 		return Result{}, fmt.Errorf("session operation outcome unknown; refresh sessions before trying again: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK || result.Error != "" {

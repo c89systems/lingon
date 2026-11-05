@@ -16,16 +16,19 @@ type Request struct {
 	SessionID string `json:"session_id"`
 	Kind      string `json:"kind"`
 	Name      string `json:"name,omitempty"`
+	Path      string `json:"path,omitempty"`
 	// Cols and Rows optionally size a created session before its program starts.
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`
 }
 
-// Result acknowledges readiness or a committed display-name change.
+// Result reports lifecycle readiness, a launch directory, or its immediate completions.
 type Result struct {
-	SessionID string `json:"session_id"`
-	Name      string `json:"name"`
-	Error     string `json:"error,omitempty"`
+	SessionID   string   `json:"session_id"`
+	Name        string   `json:"name"`
+	Error       string   `json:"error,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Directories []string `json:"directories,omitempty"`
 }
 
 // CreatedSessionID identifies the child allocated by an idempotent create request.
@@ -39,7 +42,7 @@ func Validate(req Request) error {
 	if req.RequestID == "" || len(req.RequestID) > 128 || req.SessionID == "" || len(req.SessionID) > 256 {
 		return fmt.Errorf("request_id and session_id are required and must be bounded")
 	}
-	if req.Kind != "create" && req.Kind != "rename" && req.Kind != "close" {
+	if req.Kind != "create" && req.Kind != "rename" && req.Kind != "close" && req.Kind != "directory" && req.Kind != "chdir" {
 		return fmt.Errorf("unknown session operation")
 	}
 	if req.Cols < 0 || req.Rows < 0 || req.Cols > 65535 || req.Rows > 65535 || (req.Cols == 0) != (req.Rows == 0) {
@@ -47,6 +50,18 @@ func Validate(req Request) error {
 	}
 	if req.Kind != "create" && (req.Cols != 0 || req.Rows != 0) {
 		return fmt.Errorf("only creation accepts terminal geometry")
+	}
+	if req.Kind == "directory" || req.Kind == "chdir" {
+		if req.Name != "" {
+			return fmt.Errorf("directory operations do not accept a name")
+		}
+		if req.Kind == "chdir" && req.Path == "" {
+			return fmt.Errorf("working directory is required")
+		}
+		return ValidatePath(req.Path)
+	}
+	if req.Path != "" {
+		return fmt.Errorf("only directory operations accept a path")
 	}
 	if req.Kind == "rename" {
 		return ValidateName(req.Name)

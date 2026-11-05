@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,10 +22,11 @@ const LaunchTokenEnv = "__LINGON__HEADLESS_LAUNCH_TOKEN_FD"
 // LaunchRequest configures a detached copy of the current Lingon executable.
 // Args are constructed by the host; remote clients never supply executable arguments.
 type LaunchRequest struct {
-	Executable string
-	ConfigDir  string
-	SessionID  string
-	Args       []string
+	WorkingDirectory string
+	Executable       string
+	ConfigDir        string
+	SessionID        string
+	Args             []string
 	// Env overrides host-selected child configuration. It is never supplied by remote clients.
 	Env []string
 	// Token is transferred through a private pipe, not process arguments or environment.
@@ -71,7 +73,14 @@ func Launch(ctx context.Context, req LaunchRequest) (Launched, error) {
 		return Launched{}, err
 	}
 	defer null.Close()
+	if strings.ContainsRune(exe, filepath.Separator) && !filepath.IsAbs(exe) {
+		exe, err = filepath.Abs(exe)
+		if err != nil {
+			return Launched{}, err
+		}
+	}
 	child := exec.Command(exe, req.Args...)
+	child.Dir = req.WorkingDirectory
 	detach(child)
 	child.Stdin, child.Stdout, child.Stderr = null, null, null
 	child.ExtraFiles = []*os.File{w}

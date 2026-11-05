@@ -19,6 +19,8 @@ const (
 	ActionSendCtrlD
 	// ActionNewPTY creates a new local PTY session.
 	ActionNewPTY
+	// ActionDirectory edits the focused session launch directory.
+	ActionDirectory
 	// ActionRename edits the active session display name.
 	ActionRename
 	// ActionToggleRespawn toggles respawn for the active local session.
@@ -94,6 +96,8 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionSendCtrlD, nil
 		case 'l', 'L':
 			return ActionNone, []byte{CtrlL}
+		case 'f':
+			return ActionDirectory, nil
 		case 'c':
 			return ActionNewPTY, nil
 		case 'e', 'E':

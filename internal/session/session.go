@@ -43,6 +43,8 @@ import (
 
 // Options configures a local interactive session.
 type Options struct {
+	// WorkingDirectory sets the initial launch directory; empty inherits process cwd.
+	WorkingDirectory string
 	// ConfigFile preserves host configuration defaults when starting detached terminals.
 	ConfigFile string
 	// HeadlessExecutable overrides the Lingon executable for embedded hosts.
@@ -536,6 +538,8 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 			clipboardInput.Reader = r.opts.ClipboardReader
 		}
 		var rename control.RenamePrompt
+		var folder control.DirectoryPrompt
+		defer folder.Close()
 		var search control.SearchPrompt
 		var searchImportant atomic.Bool
 		defer search.Close()
@@ -661,6 +665,9 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 				return true
 			}
 			processNormalByte := func(b byte) bool {
+				if folder.HandlesInput() && folder.Feed(b) {
+					return true
+				}
 				if search.HandlesInput() {
 					result := search.Feed(b, searchSessions())
 					if len(result.SessionIDs) > 0 {
@@ -831,6 +838,24 @@ func (r *Runner) Run(ctx context.Context) (retErr error) {
 								r.logger.Debug("session.remote.command.failed", "session", activeID, "kind", protocolpb.CommandKind_COMMAND_KIND_SEND_EOF.String(), "err", err)
 							}
 						}
+					case control.ActionDirectory:
+						caller := sessionmanage.CallerFunc(func(ctx context.Context, req sessionmanage.Request) (sessionmanage.Result, error) {
+							if r.localSession(req.SessionID) != nil {
+								return r.Manage(ctx, req), nil
+							}
+							if r.remoteSessions != nil {
+								return r.remoteSessions.Manage(ctx, req), nil
+							}
+							return sessionmanage.Result{}, fmt.Errorf("session is unavailable")
+						})
+						folder.Begin(sigCtx, control.DirectoryPromptOptions{SessionID: activeID, Caller: caller, Clock: r.clock, OnChange: func(view control.DirectoryView) {
+							if sigCtx.Err() != nil {
+								return
+							}
+							r.runtime().ApplyAction(mvu.SearchAction{Search: mvu.SearchState{Visible: view.Active, Label: control.DirectoryLabel, Text: view.Text, Ghost: view.Ghost, Hint: view.Hint}})
+							r.forceRedraw(stdout)
+						}})
+						return true
 					case control.ActionRename:
 						rename.Begin(activeID, r.clock)
 						r.showStatus(rename.Label(), stdout, 24*time.Hour)
@@ -2053,6 +2078,18 @@ func parseSessionSequenceSuffix(name string) int {
 }
 
 func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, offline bool, tokenRefresher func(context.Context) (string, error), gate *netgate.Gate, stdout, stdin *os.File, debugRemoteInput bool) (*localSession, error) {
+	directory := r.opts.WorkingDirectory
+	source, _ := r.focusedSession()
+	if parent := r.popups.Parent(id); parent != "" {
+		source = parent
+	}
+	if local := r.localSession(source); local != nil && source != id {
+		var err error
+		directory, err = local.directory.Path()
+		if err != nil {
+			return nil, err
+		}
+	}
 	cols, rows := r.terminalGeometry()
 	cursorQuery := r.cursorQueryFunc(stdout, stdin)
 	if r.popups.Parent(id) != "" {
@@ -2062,6 +2099,7 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 	}
 	session := newLocalSession(ctx, localSessionOptions{
 		ID:                id,
+		WorkingDirectory:  directory,
 		Name:              name,
 		Shell:             r.opts.Shell,
 		Term:              r.opts.Term,
@@ -2197,8 +2235,8 @@ func (r *Runner) addLocalSession(ctx context.Context, id, name string, respawn, 
 		pub.OnClipboard = session.handleClipboard
 		pub.OnClipboardReset = session.clipboardHandler.Reset
 		pub.OnManagement = func(ctx context.Context, request *protocolpb.SessionManagement) *protocolpb.SessionManagement {
-			result := r.Manage(ctx, sessionmanage.Request{RequestID: request.RequestId, SessionID: session.ID(), Kind: request.Kind, Name: request.Name, Cols: int(request.Cols), Rows: int(request.Rows)})
-			return &protocolpb.SessionManagement{ResultSessionId: result.SessionID, Name: result.Name, Error: result.Error}
+			result := r.Manage(ctx, sessionmanage.Request{RequestID: request.RequestId, SessionID: session.ID(), Kind: request.Kind, Name: request.Name, Path: request.Path, Cols: int(request.Cols), Rows: int(request.Rows)})
+			return &protocolpb.SessionManagement{ResultSessionId: result.SessionID, Name: result.Name, Path: result.Path, Directories: result.Directories, Error: result.Error}
 		}
 		pub.OnCommand = func(kind protocolpb.CommandKind) {
 			r.HandleSessionCommand(session.ctx, session.ID(), kind)

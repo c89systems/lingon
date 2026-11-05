@@ -452,6 +452,28 @@ unsupported or restricted window to resize.
 | [Tmux](https://github.com/tmux/tmux/blob/master/input.c) | Consumes the ordinary resize sequence; use a direct terminal for window restoration. Split panes also constrain the available grid. |
 | Other terminals / window managers | Support varies. A reported `TERM=xterm-256color` alone does not establish window-resize support. Tiling, fullscreen and screen-size constraints may prevent an exact fit. |
 
+#### Change a session's launch directory
+
+`Ctrl+l f` opens **working directory:** at the lower left, prefilled with the
+focused session's full launch path. It edits the directory on that session's
+owning machine, including through `lingon attach` and `attach -x`. Enter saves;
+Escape or Ctrl+C cancels. Ctrl+U clears the field; Ctrl+W deletes the last path
+component. Paths can contain spaces and may be absolute, relative to the current
+launch directory, or start with `~/` for the owner's home directory.
+
+Type a directory prefix to see a gray completion. Tab completes it and cycles
+through matching directories at that level; Shift+Tab cycles backwards. Type
+more after the completed trailing slash to descend another level. Files are
+excluded, symlinks to directories are included, and completion never scans a
+subtree. Missing or inaccessible paths leave the prompt open with an error.
+
+This is a per-session runtime setting: it survives client reconnects, affects
+future `Ctrl+l c` sessions, new `Ctrl+l j` popups, and application respawns.
+The currently running application keeps its own cwd. Existing child sessions
+keep their own setting, and hiding/showing a popup does not restart it. The
+setting does not change the attach process's cwd and is not saved after the
+owning Lingon process exits. Share clients cannot inspect or change directories.
+
 #### Create and rename sessions
 
 - In `lingon attach` (including `attach -x`), `Ctrl+l c` starts and selects a
@@ -465,8 +487,8 @@ unsupported or restricted window to resize.
 Remote management requires the session's owner account and a connected host;
 it does not require the terminal control lease. Share sessions cannot create or
 rename terminals. Local `attach -x` management works while publishing is offline.
-New detached terminals inherit the host process's startup directory and terminal
-configuration, and survive the creating client or host exiting. Lingon does not
+New detached terminals inherit their source session's current launch directory
+and terminal configuration, and survive the creating client or host exiting. Lingon does not
 track the running shell's current directory.
 
 Names are display metadata: renaming preserves the session ID, socket filename,

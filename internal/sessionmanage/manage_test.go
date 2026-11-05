@@ -2,6 +2,7 @@ package sessionmanage
 
 import (
 	"context"
+	"reflect"
 	"sync/atomic"
 	"testing"
 )
@@ -41,7 +42,7 @@ func TestManagementCoalescesAndRejectsConflictingOrBusyRequests(t *testing.T) {
 	first := <-result
 	for range 10 {
 		got := m.Execute(context.Background(), req, func() Result { calls.Add(1); return Result{} })
-		if got != first {
+		if !reflect.DeepEqual(got, first) {
 			t.Fatalf("duplicate=%+v want %+v", got, first)
 		}
 	}

@@ -206,4 +206,6 @@ message SessionManagement {
   bool completed = 7;
   uint32 cols = 8;
   uint32 rows = 9;
+  string path = 10;
+  repeated string directories = 11;
 }

@@ -94,3 +94,23 @@ func TestImportantPromptCompositionAndClipping(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectoryFieldPrefixCursorAndClipping(t *testing.T) {
+	for _, cols := range []int{1, 5, 20, 80} {
+		state := NewRuntime().Read()
+		state.Search = SearchState{Visible: true, Label: "working directory: ", Text: "/owner/日本語", Ghost: "_build/", Hint: "loading…"}
+		resolved := Resolve(state, Cursor{}, time.Time{}, ResolveOptions{})
+		snap, err := ComposeViewportSnapshot(BlankSnapshot(cols, 4), cols, 4, resolved, Cursor{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if int(snap.Cursor.X) >= cols || snap.Cursor.Y != 3 {
+			t.Fatalf("%d: %v", cols, snap.Cursor)
+		}
+		if cols == 80 {
+			if string(rune(snap.Runes[3*cols])) != "w" || snap.Cursor.X != 32 {
+				t.Fatalf("prefix/cursor: %v", snap.Cursor)
+			}
+		}
+	}
+}

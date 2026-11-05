@@ -2002,6 +2002,8 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 	}()
 	var rename control.RenamePrompt
+	var folder control.DirectoryPrompt
+	defer folder.Close()
 	var search control.SearchPrompt
 	var searchImportant atomic.Bool
 	defer search.Close()
@@ -2317,6 +2319,9 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			m.Logger.Debug("attach.stdin.read", "bytes", len(data))
 		}
 		processNormalByte := func(b byte) bool {
+			if folder.HandlesInput() && folder.Feed(b) {
+				return true
+			}
 			client := focusedClient()
 			if search.HandlesInput() {
 				result := search.Feed(b, searchSessions())
@@ -2522,6 +2527,20 @@ func (m *MultiClient) Run(ctx context.Context) error {
 					if client != nil {
 						manageSession(client, sessionmanage.Request{RequestID: client.newClientID(), SessionID: client.SessionID, Kind: "create"})
 					}
+					return true
+				case control.ActionDirectory:
+					if client == nil {
+						return true
+					}
+					folder.Begin(ctx, control.DirectoryPromptOptions{SessionID: client.SessionID, Caller: client, Clock: m.Clock, OnChange: func(view control.DirectoryView) {
+						if ctx.Err() != nil {
+							return
+						}
+						_, active, _, _, _ := activeViewSnapshot()
+						if active != nil {
+							active.renderSearch(mvu.SearchState{Visible: view.Active, Label: control.DirectoryLabel, Text: view.Text, Ghost: view.Ghost, Hint: view.Hint})
+						}
+					}})
 					return true
 				case control.ActionRename:
 					if client != nil {

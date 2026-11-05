@@ -32,6 +32,7 @@ type localSession struct {
 	nameMu sync.RWMutex
 	name   string
 
+	directory         *sessionmanage.Directory
 	shell             string
 	term              string
 	clipboardMu       sync.Mutex
@@ -429,6 +430,7 @@ func analyzeRecentInput(data []byte) recentInputSignals {
 }
 
 type localSessionOptions struct {
+	WorkingDirectory  string
 	ID                string
 	Name              string
 	Shell             string
@@ -464,6 +466,7 @@ func newLocalSession(parent context.Context, opts localSessionOptions) *localSes
 	}
 	session := &localSession{
 		id:                opts.ID,
+		directory:         sessionmanage.NewDirectory(opts.WorkingDirectory),
 		name:              sessionmanage.NormalizeName(opts.Name),
 		shell:             opts.Shell,
 		term:              opts.Term,
@@ -1175,8 +1178,13 @@ func (s *localSession) runOnce(ctx context.Context) error {
 	if rows <= 0 {
 		rows = 24
 	}
+	directory, err := s.directory.Path()
+	if err != nil {
+		s.reportStartup(err)
+		return err
+	}
 	ptyFile, ttyFile, cmd, err := startShell(shellStart{
-		shell: s.shell, term: s.term, clipboard: endpoint,
+		shell: s.shell, term: s.term, clipboard: endpoint, directory: directory,
 		size: terminal.WindowSize{Cols: cols, Rows: rows},
 	})
 	if err != nil {

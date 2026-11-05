@@ -3,6 +3,7 @@ package sessionmanage
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,5 +42,20 @@ func TestCallNormalizesNamesBeforeSending(t *testing.T) {
 	result, err := Call(context.Background(), server.Client(), server.URL, "owner", Request{RequestID: "normalize", SessionID: "stable", Kind: "rename", Name: "build server"})
 	if err != nil || result.Name != "build_server" {
 		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+func TestDirectoryCallAcceptsOneLevelListingLargerThanOldReplyLimit(t *testing.T) {
+	directories := make([]string, 128)
+	for i := range directories {
+		directories[i] = "/owner/" + strings.Repeat("directory", 8) + fmt.Sprint(i) + "/"
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(Result{SessionID: "s", Path: "/owner", Directories: directories})
+	}))
+	defer server.Close()
+	result, err := Call(t.Context(), server.Client(), server.URL, "owner", Request{RequestID: "list", SessionID: "s", Kind: "directory"})
+	if err != nil || len(result.Directories) != 128 {
+		t.Fatalf("listing: %d %v", len(result.Directories), err)
 	}
 }

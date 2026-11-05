@@ -15,6 +15,7 @@ type RenamePrompt struct {
 	Active         bool
 	SessionID      string
 	text           []byte
+	limit          int
 	escape         bool
 	escapeSequence bool
 	clock          clock.Clock
@@ -27,7 +28,7 @@ func (p *RenamePrompt) Begin(id string, clk clock.Clock) {
 	if clk == nil {
 		clk = clock.New()
 	}
-	*p = RenamePrompt{Active: true, SessionID: id, clock: clk}
+	*p = RenamePrompt{Active: true, SessionID: id, clock: clk, limit: 320}
 }
 
 // Label returns a printable prompt without incomplete UTF-8 or terminal escapes.
@@ -63,7 +64,7 @@ func (p *RenamePrompt) Feed(b byte) (name string, done bool) {
 		}
 		return "", false
 	}
-	if b >= 0x20 && len(p.text) < 320 {
+	if b >= 0x20 && len(p.text) < p.limit {
 		p.text = append(p.text, b)
 	}
 	return "", false

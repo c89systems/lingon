@@ -22,7 +22,7 @@ func (d *Daemon) handleSessionManagement(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var req sessionmanage.Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SessionID != d.sessionID || d.runner == nil {
 		w.WriteHeader(http.StatusBadRequest)

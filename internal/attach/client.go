@@ -2395,6 +2395,8 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 	buf := make([]byte, 1024)
 	prefill := make([]byte, 0, 1024)
 	var prefix control.Prefix
+	var folder control.DirectoryPrompt
+	defer folder.Close()
 	var search control.SearchPrompt
 	var searchImportant atomic.Bool
 	defer search.Close()
@@ -2458,6 +2460,9 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 			return true
 		}
 		processNormalByte := func(b byte) bool {
+			if folder.HandlesInput() && folder.Feed(b) {
+				return true
+			}
 			if search.HandlesInput() {
 				result := search.Feed(b, searchSessions())
 				if len(result.SessionIDs) > 0 {
@@ -2496,6 +2501,14 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 				case control.ActionResetImportant:
 					c.applyCompositorAction(mvu.ImportantTabsAction{Reset: true})
 					c.renderCurrent()
+					return true
+				case control.ActionDirectory:
+					folder.Begin(ctx, control.DirectoryPromptOptions{SessionID: c.SessionID, Caller: c, Clock: c.clock(), OnChange: func(view control.DirectoryView) {
+						if ctx.Err() != nil {
+							return
+						}
+						c.renderSearch(mvu.SearchState{Visible: view.Active, Label: control.DirectoryLabel, Text: view.Text, Ghost: view.Ghost, Hint: view.Hint})
+					}})
 					return true
 				case control.ActionToggleImportant:
 					searchImportant.Store(false)

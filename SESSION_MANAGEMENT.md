@@ -17,8 +17,9 @@ before readiness terminates the child. No in-process fork is needed.
 The host constructs all executable arguments. It forwards the selected config
 root/file, shell, terminal type, current geometry and publishing state,
 respawn/scrollback settings, relay authentication and TLS trust directory.
-The child inherits the host process's startup working directory,
-not the selected shell's current directory. Embedded hosts can specify
+The child inherits the source session's launch directory (initially the owning
+process's startup cwd, editable with `Ctrl+l f`), rather than tracking the
+running shell's cwd. Embedded hosts can specify
 `InteractiveOptions.HeadlessExecutable` when their own executable is not the
 Lingon CLI; `ConfigDir` and `ConfigFile` select the child configuration.
 
@@ -119,6 +120,26 @@ Removed IDs do not transfer their marks to a new session with the same name.
 Marks can be toggled individually or cleared with reset; exiting the UI discards
 them. Neither the backend nor
 Android/Web clients store this UI preference.
+
+## Launch directories
+
+`Ctrl+l f` edits the focused session's future launch directory through the same
+owner-only management route as creation/rename. Read-only `directory` requests
+return the current path and one level of matching subdirectories; `chdir` commits
+a validated absolute path. Neither operation changes a process-wide cwd or sends
+shell commands into the running application. Child sessions copy the source's
+setting at creation, and respawns read their own session's latest setting.
+These runtime settings survive attach/relay reconnects but not an owner restart.
+
+Completions include directory symlinks, exclude ordinary files and terminal
+control characters, and never traverse the whole tree. Oversized result sets
+produce an explicit request to refine the prefix. Directory and save requests
+are bounded by the input owner's injected clock. Typing refines a cached or
+in-flight lookup at the same level; changing levels starts a new asynchronous
+query. Tab/Enter wait for their result before later keys run,
+with WebSocket acknowledgement reads and rendering independent of that wait.
+Generation checks discard cancelled and superseded replies. Invalid targets
+keep the field open; a timed-out save requires reloading to confirm its outcome.
 
 ## Identity and retries
 
