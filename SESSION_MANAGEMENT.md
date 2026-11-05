@@ -2,7 +2,7 @@
 
 ## Lifecycle contract
 
-Owner clients can create a detached terminal on a connected session's machine
+Owner clients can create a detached terminal on a connected session's machine,
 rename that session, or force-close it. Local headless clients use the existing owner-permissioned
 Unix socket; remote clients use authenticated `POST /sessions/manage`. Share
 credentials and other accounts cannot manage the session, regardless of their
@@ -45,7 +45,7 @@ popup, even while hidden.
 After `Ctrl+l`, `Ctrl+j` is an alias for `j` (show/hide popup), `Ctrl+n` for `n`
 (next tab), `Ctrl+p` for `p` (previous tab), and `Ctrl+t` for `t` (next theme).
 These control keys pass through normally without the prefix. Session search
-remains `Ctrl+l /`.
+uses `Ctrl+l /` for all tabs and `Ctrl+l ?` for important tabs.
 
 Popup programs start with the content box's width and height, excluding the bar.
 Creation can supply initial columns and rows; without them, a new session inherits
@@ -66,6 +66,14 @@ through as normal terminal input, allowing shell logout to close the popup.
 Once focus returns to the parent, the next Ctrl+D detaches attach. Hidden popups
 do not change the parent's detach behavior. `Ctrl+l d` still sends an explicit
 Ctrl+D to the focused terminal.
+
+The application retains its own PTY settings when control changes. Explicit
+Ctrl+D is byte `0x04`: with the usual canonical EOF setting it flushes a partial
+line, or produces EOF on an empty line; in raw mode the application receives the
+byte unchanged. Lingon does not enable/disable the PTY's EOF character around the
+write. This behavior requires an updated running host, not just a new attach
+client.
+
 `Ctrl+l C` sends exactly carriage return followed by `~.` to disconnect SSH;
 lowercase `c` remains new session.
 
@@ -84,6 +92,18 @@ it is never synchronized to the host, other Lingon processes, or the OS
 clipboard. Copying includes full source rows, even when wider than the viewport,
 trims terminal padding at the right edge, and ends each physical row with a
 newline. Paste honors the destination application's bracketed-paste mode.
+
+Important-tab marks are UI-local, keyed by immutable session ID and shared by
+the local and remote tabs displayed in that UI. `Ctrl+l i` (also
+`Ctrl+l Ctrl+i`) adds the parent tab to the set; `Ctrl+l I` resets it. Unmarked
+tabs and the bar use the selected theme's darker terminal palette, preserving
+the active-tab style and search brackets. `Ctrl+l ?` restricts suggestions and
+Tab/Shift+Tab cycling to marked IDs, retaining the current tab's place in the
+full tab order as the cycling origin. It searches all tabs when the mode is
+inactive; `/` always searches all tabs. Rename and reconnect do not alter marks.
+Removed IDs do not transfer their marks to a new session with the same name;
+only explicit reset or exiting the UI clears the set. Neither the backend nor
+Android/Web clients store this UI preference.
 
 ## Identity and retries
 
@@ -157,3 +177,13 @@ describe the current host and load, not a latency guarantee. Keep measurements
 and run results under ignored `build/verification/`, rather than in this document.
 
 These focused commands do not replace the full [release gate](RELEASE.md).
+
+Desktop input/display checks cover visual line selection and paste, important
+tabs and filtered search, help headers, and native EOF delivery. They exercise
+actual keys in owned PTYs, including real CLI connections over local sockets and
+the relay. Run them serially:
+
+```sh
+bash scripts/verify-contained.sh go test -race ./internal/ptytest -run '^Test(ScrollbackVisual|Important|HelpCopyright)' -count=1
+bash scripts/verify-contained.sh go test -race -tags=integration ./integration/pty/attach -run '^Test(ScrollbackCopyPaste|ImportantTabsLocalAndRelayCLI|ApplicationEOFNativeTermiosAndPartialLineCLI)' -count=1
+```

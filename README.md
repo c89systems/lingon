@@ -321,7 +321,24 @@ Output keeps filling the buffer while the rows you are viewing stay in place.
 Navigation moves that anchor; `End` or `G` jumps to the newest content without
 leaving scrollback mode. Later output accumulates below that position. If the
 history limit removes the anchored text, the view clamps to the oldest retained
-rows. Press `q` or Escape to return to the live screen.
+rows. Press `q` or `Q` to return to the live screen.
+
+For line copying, press lowercase `v`. The cursor starts at the middle-left;
+vertical navigation moves it and scrolls the viewport only at its edges.
+Space starts a full-line selection in inverted colors. Space again copies the
+inclusive selection and clears its inversion, leaving the visual cursor active.
+`v` cancels an unfinished selection and returns to ordinary scrollback; `q`
+returns to the live screen. Uppercase `V` is reserved; horizontal movement is
+disabled while the visual cursor is active.
+
+Press `Ctrl+l ]` to paste into the focused terminal, including a popup. The text
+clipboard is shared across tabs in this one interactive Lingon process, held
+only in memory, and independent of the OS/image clipboard and other Lingon
+processes. Copy includes entire physical source rows, even when wider than the
+viewport, removes right-edge padding, and ends each row with a newline. Paste
+honors the destination application's bracketed-paste mode; otherwise row endings
+are sent as Enter. Starting or cancelling a new selection preserves the previous
+clipboard until the second Space commits a replacement.
 
 #### Find a session
 
@@ -330,10 +347,11 @@ field at the bottom left. Type a case-sensitive session-name prefix; the rest
 of the suggested name appears in gray. Enter accepts the suggestion and opens
 that exact session. Tab first fills the suggestion; further Tab presses cycle
 through session names in tab order, wrapping at the end. Tab on an empty field
-starts with the first tab. Shift+Tab cycles in reverse, wrapping from the first
-tab to the last; on an empty field it starts with the last tab. Like Tab, it
-first fills an incomplete suggestion. An exact typed name takes precedence
-over longer prefix matches. Duplicate names remain separate selectable sessions.
+starts with the tab after the current session. Shift+Tab cycles in reverse;
+on an empty field it starts with the tab before the current session. Both wrap
+around the tab list. Like Tab, Shift+Tab first fills an incomplete suggestion.
+An exact typed name takes precedence over longer prefix matches. Duplicate names
+remain separate selectable sessions.
 
 Search keeps the current session active until Enter. Escape or Ctrl+C cancels;
 Backspace edits the prefix. Enter with no matching session leaves the field
@@ -346,6 +364,28 @@ Search temporarily shows the bar even when it is hidden. Cancellation restores
 the active tab and prior bar visibility. Outside search, the bar scrolls
 automatically to keep the active tab visible when switching tabs or resizing
 the window.
+
+#### Mark important tabs
+
+In the interactive host or `lingon attach`, `Ctrl+l i` marks the current tab
+as important. `Ctrl+l Ctrl+i` is an alias (the second key is also Tab). The first
+mark enters important-tab mode: the bar and unmarked tabs use a darker variant
+of the selected theme, while marked tabs keep their normal colors. The active
+tab remains distinguishable in either group. Marking more tabs adds them to the
+set; marking an already important tab leaves it marked. `Ctrl+l I` clears every
+mark and restores the normal bar.
+
+`Ctrl+l ?` opens the same search field as `/`, limited to important tabs while
+this mode is active. Tab and Shift+Tab cycle through marked tabs relative to the
+current tab, including when the current tab is unmarked. `Ctrl+l /` always
+searches all tabs. Outside important-tab mode, `?` is an alias for `/`.
+
+Marks belong to this UI process and session identities: they survive tab switches,
+renames, theme changes and reconnects, without affecting another host/attach UI.
+Marking from a popup marks its parent tab. A new session reusing a marked name
+does not inherit the mark. Closing marked tabs does not reset the mode; use
+`Ctrl+l I` to reset it. Marks are not saved across process restarts. Android and
+the Web UI do not expose this mode.
 
 #### Restore the remote terminal size
 
