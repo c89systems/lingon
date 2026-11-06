@@ -1062,6 +1062,9 @@ func cloneScrollbackRow(row *protocolpb.ScrollbackRow) *protocolpb.ScrollbackRow
 		return &protocolpb.ScrollbackRow{}
 	}
 	out := &protocolpb.ScrollbackRow{}
+	if len(row.Hyperlinks) > 0 {
+		out.Hyperlinks = append([]string(nil), row.Hyperlinks...)
+	}
 	if len(row.Runes) > 0 {
 		out.Runes = append(out.Runes, row.Runes...)
 	}

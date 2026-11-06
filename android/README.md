@@ -34,6 +34,13 @@ rendering pipeline.
   Android clipboard contents into the active terminal, including after switching
   sessions.
 
+## Terminal links
+
+Tap an OSC 8 link label to open its transmitted HTTP or HTTPS target in Android's
+link handler. Targets survive terminal updates, tab reopening and scrollback;
+ordinary underlining does not create a link. Visible HTTPS URLs remain tappable.
+Both the publishing host/`lingonx` and the app need a build with OSC 8 support.
+
 ## Prereqs
 
 - JDK 21, with `java` and `keytool` on `PATH`.

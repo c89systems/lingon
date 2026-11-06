@@ -392,6 +392,8 @@ keep the application's styling; ordinary underlines do not become hyperlinks.
 Use your outer terminal emulator's usual hyperlink gesture to open a target.
 The publishing host or `lingonx` and attach must both run a build with this support;
 an older host has already discarded the targets before attach receives the screen.
+The Android app also preserves these targets in live output and scrollback; tap
+a label to open its HTTP or HTTPS target using Android's link handler.
 
 #### Mark important tabs
 

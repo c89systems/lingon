@@ -4160,6 +4160,106 @@ class EndToEndTest {
     }
 
     @Test
+    fun osc8_labels_open_host_and_headless_targets_through_relay() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        setResizeHostEnabled(false)
+        val survivor = activeSessionId()
+        val host = startHostsViaHarness(count = 1, cols = 60, rows = 12, shell = "/bin/sh").single()
+        val headless = startHeadlessViaHarness(cols = 60, rows = 12)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val opened = java.util.concurrent.LinkedBlockingQueue<android.content.Intent>()
+        // Exercise the production link opener but intercept browser launches so the
+        // test remains self-contained and does not depend on network/browser state.
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action != android.content.Intent.ACTION_VIEW) return null
+                opened.add(intent)
+                return android.app.Instrumentation.ActivityResult(0, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        var tapTime = SystemClock.uptimeMillis()
+        fun emit(payload: String) {
+            composeRule.runOnIdle {
+                appViewModel().sendRawInput("printf '\\033[2J\\033[H\\033]8;$payload\\033\\\\Chalmers Ventures\\033]8;;\\033\\\\\\nPLAIN_UNDERLINE\\n'\n")
+            }
+        }
+        fun awaitTarget(target: String) {
+            waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                stateForTest().activeSnapshot?.let { snapshot ->
+                    snapshot.hyperlinks?.any { it.substringAfter(';', "") == target } == true &&
+                        systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(snapshot).any { it.url == target }
+                } == true
+            }
+        }
+        fun tapTarget(target: String) {
+            composeRule.runOnIdle {
+                val view = findTerminalView() as? TerminalGridView ?: throw AssertionError("missing terminal grid")
+                val snap = stateForTest().activeSnapshot ?: throw AssertionError("missing terminal snapshot")
+                val link = systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(snap).first { it.url == target }
+                view.restoreViewportState(view.captureViewportState().copy(
+                    cameraOffsetXPx = 0f,
+                    cameraOffsetYPx = link.startRow * view.getScaledCellHeightForTesting(),
+                    mode = systems.pkt.lingon.terminal.TerminalViewportMode.Manual,
+                ))
+                assertEquals(target, view.getLinkAtCellForTesting(link.startRow, link.startCol))
+                val x = (link.startCol + 0.5f) * view.getScaledCellWidthForTesting() - view.getCameraOffsetXForTesting()
+                val y = (link.startRow + 0.5f) * view.getScaledCellHeightForTesting() - view.getCameraOffsetYForTesting()
+                assertTrue("link outside terminal viewport", x >= 0 && x < view.width && y >= 0 && y < view.getViewportHeightForTesting())
+                // Explicit event times keep independent taps outside Android's
+                // double-tap interval without wall-clock sleeps.
+                tapTime = maxOf(SystemClock.uptimeMillis(), tapTime + android.view.ViewConfiguration.getDoubleTapTimeout() + 100L)
+                val time = tapTime
+                for ((action, offset) in listOf(MotionEvent.ACTION_DOWN to 0L, MotionEvent.ACTION_UP to 16L)) {
+                    val event = MotionEvent.obtain(time, time + offset, action, x, y, 0)
+                    try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+                }
+            }
+            val intent = opened.poll() ?: throw AssertionError("label tap did not launch ACTION_VIEW")
+            assertEquals(target, intent.dataString)
+            assertTrue(intent.categories.orEmpty().contains(android.content.Intent.CATEGORY_BROWSABLE))
+            assertTrue("label tap opened multiple activities", opened.isEmpty())
+        }
+        try {
+            for (id in listOf(host, headless)) {
+                selectSessionForFixture(id, expectedCols = 60, expectedRows = 12)
+                val first = "https://example.test/$id/first?q=1;two"
+                val second = "https://example.test/$id/second"
+                emit("id=label;$first")
+                awaitTarget(first)
+                tapTarget(first)
+                emit("id=label;$second")
+                awaitTarget(second)
+                assertFalse(systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(stateForTest().activeSnapshot!!).any { it.url == first })
+                tapTarget(second)
+                // Switching away closes this view; reopening must recover links from
+                // a fresh host snapshot rather than relying on the previous diff.
+                selectSessionForFixture(survivor)
+                selectSessionForFixture(id, expectedCols = 60, expectedRows = 12)
+                awaitTarget(second)
+                tapTarget(second)
+                composeRule.runOnIdle { appViewModel().sendRawInput("seq 1 40; echo OSC8_HISTORY_READY\n") }
+                waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("OSC8_HISTORY_READY") && !snapshotContainsToken("Chalmers Ventures") }
+                composeRule.runOnIdle { appViewModel().adjustScrollback(Int.MAX_VALUE) }
+                awaitTarget(second)
+                assertTrue(stateForTest().scrollbackOffsetRows > 0)
+                tapTarget(second)
+                composeRule.runOnIdle { appViewModel().adjustScrollback(Int.MIN_VALUE) }
+                emit("")
+                waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                    snapshotContainsToken("Chalmers Ventures") &&
+                        systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(stateForTest().activeSnapshot!!).none { it.url == second }
+                }
+            }
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
+    }
+
+    @Test
     fun replaced_session_with_reused_name_shows_only_new_terminal() {
         setEndpoint(testConfig.endpoint)
         ensureLoggedOut()

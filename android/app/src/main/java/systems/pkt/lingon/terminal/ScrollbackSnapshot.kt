@@ -34,6 +34,9 @@ fun buildScrollbackSnapshot(
     val fg = IntArray(size)
     val bg = IntArray(size)
     val graphemes = if (live.graphemes != null) Array(size) { "" } else null
+    val hyperlinks = if (live.hyperlinks != null || scrollback.any { it.hyperlinksCount > 0 }) {
+        Array(size) { "" }
+    } else null
     var hasGraphemes = false
 
     fun fillFromRow(dstRow: Int, row: ScrollbackRow) {
@@ -45,6 +48,7 @@ fun buildScrollbackSnapshot(
         val rowGraphemes = row.graphemesList
         for (x in 0 until cols) {
             val idx = base + x
+            hyperlinks?.set(idx, row.hyperlinksList.getOrElse(x) { "" })
             if (x < rowRunes.size) runes[idx] = rowRunes[x]
             if (x < rowModes.size) modes[idx] = rowModes[x]
             if (x < rowFg.size) fg[idx] = rowFg[x]
@@ -73,6 +77,7 @@ fun buildScrollbackSnapshot(
         for (x in 0 until cols) {
             val src = srcBase + x
             val dst = dstBase + x
+            hyperlinks?.set(dst, live.hyperlinks?.getOrNull(src).orEmpty())
             if (src < live.runes.size) runes[dst] = live.runes[src]
             if (src < live.modes.size) modes[dst] = live.modes[src]
             if (src < live.fg.size) fg[dst] = live.fg[src]
@@ -96,6 +101,7 @@ fun buildScrollbackSnapshot(
         fg = fg,
         bg = bg,
         graphemes = finalGraphemes,
+        hyperlinks = hyperlinks,
         cursorX = 0,
         cursorY = 0,
         cursorVisible = false,

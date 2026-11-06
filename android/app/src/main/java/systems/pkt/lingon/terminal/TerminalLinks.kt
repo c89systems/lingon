@@ -1,5 +1,7 @@
 package systems.pkt.lingon.terminal
 
+import java.net.URI
+
 data class TerminalLinkRange(
     val url: String,
     val startRow: Int,
@@ -36,7 +38,7 @@ object TerminalLinks {
             }
         }
 
-        return findHttpsLinks(text.toString()).mapNotNull { match ->
+        return explicitLinks(snapshot) + findHttpsLinks(text.toString()).mapNotNull { match ->
             val start = firstMappedCell(cells, match.start) ?: return@mapNotNull null
             val end = lastMappedCell(cells, match.endExclusive - 1) ?: return@mapNotNull null
             TerminalLinkRange(
@@ -78,6 +80,40 @@ object TerminalLinks {
         return links
     }
 
+    // Keep explicit application targets separate from visible-URL inference. Even
+    // rejected metadata suppresses inference, so a URL label cannot open a different target.
+    private fun explicitLinks(snapshot: TerminalSnapshot): List<TerminalLinkRange> {
+        val payloads = snapshot.hyperlinks ?: return emptyList()
+        val links = ArrayList<TerminalLinkRange>()
+        for (row in 0 until snapshot.rows) {
+            var col = 0
+            while (col < snapshot.cols) {
+                val start = col
+                val payload = payloads.getOrNull(row * snapshot.cols + col).orEmpty()
+                val target = targetUri(payload)
+                if (target == null || snapshot.modes[row * snapshot.cols + col] and MODE_HIDDEN != 0) {
+                    col++
+                    continue
+                }
+                do { col++ } while (col < snapshot.cols &&
+                    payloads.getOrNull(row * snapshot.cols + col) == payload &&
+                    snapshot.modes[row * snapshot.cols + col] and MODE_HIDDEN == 0)
+                links.add(TerminalLinkRange(target, row, start, row, col))
+            }
+        }
+        return links
+    }
+
+    private fun targetUri(payload: String): String? {
+        val separator = payload.indexOf(';')
+        if (separator < 0 || payload.any { it.isISOControl() }) return null
+        val target = payload.substring(separator + 1)
+        val uri = runCatching { URI(target) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) && !uri.scheme.equals("http", ignoreCase = true)) return null
+        if (uri.rawAuthority.isNullOrEmpty()) return null
+        return target
+    }
+
     private fun appendCellText(
         snapshot: TerminalSnapshot,
         row: Int,
@@ -100,6 +136,7 @@ object TerminalLinks {
             return
         }
         val cellText = when {
+            !snapshot.hyperlinks?.getOrNull(idx).isNullOrEmpty() -> " "
             snapshot.modes.getOrElse(idx) { 0 } and MODE_HIDDEN != 0 -> " "
             snapshot.graphemes?.getOrElse(idx) { "" }?.isNotEmpty() == true -> snapshot.graphemes[idx]
             else -> {
