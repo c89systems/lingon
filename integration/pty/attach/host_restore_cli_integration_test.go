@@ -42,7 +42,11 @@ func TestHostRestoreCLI(t *testing.T) {
 				wait(func(s ptytest.Screen) bool { return s.Contains(fmt.Sprintf("%s:%d %d", marker, rows, cols)) })
 			}
 			wait(func(s ptytest.Screen) bool { return s.Contains("PROMPT>") })
-			viewer.Send("\x0c/remote\r")
+			// The shell can be ready before relay discovery. Keep search open
+			// until its tab source includes the remote, then submit the name.
+			viewer.Send("\x0c/")
+			wait(func(s ptytest.Screen) bool { return strings.Contains(s.Row(0), "remote") })
+			viewer.Send("remote\r")
 			request(100, 30)
 			viewer.Resize(100, 30)
 			reply("REMOTE_ACK", 100, 30)

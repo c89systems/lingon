@@ -2424,8 +2424,10 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				}
 				switch action {
 				case control.ActionToggleRestore:
-					if client != nil {
-						if client.toggleRestore() {
+					// Restore governs the outer window, even when the popup has input focus.
+					_, parent, _, _, _ := activeViewSnapshot()
+					if parent != nil {
+						if parent.toggleRestore() {
 							showConnected("Restore: follow session size", 2*time.Second)
 						} else {
 							showConnected("Restore off", 2*time.Second)

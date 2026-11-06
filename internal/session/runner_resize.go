@@ -186,6 +186,8 @@ func (r *Runner) ResizeActiveIfChanged(cols, rows int) bool {
 		if request := r.windowRequest(activeID); request != nil {
 			request.Observe(actual)
 		}
+		// The parent retains its logical size; the popup follows the now-acknowledged physical viewport.
+		r.resizePopup()
 		return false
 	}
 	if r.restoreEnabled() {
