@@ -2437,7 +2437,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		if state.ActiveTab >= 0 && state.ActiveTab < len(state.Tabs) {
 			name = state.Tabs[state.ActiveTab].Title
 		}
-		return []control.SearchSession{{ID: c.SessionID, Name: name, Excluded: searchImportant.Load() && state.ImportantTabs.Active() && !state.ImportantTabs.Contains(c.SessionID)}}
+		return []control.SearchSession{{ID: c.SessionID, Name: name, Excluded: searchImportant.Load() && state.ImportantTabs.Active() && !state.ImportantTabs.Contains(c.SessionID), Marked: state.ImportantTabs.Contains(c.SessionID)}}
 	}
 	// Serialize timer and input redraws so an older view cannot hide a new search.
 	var searchRenderMu sync.Mutex

@@ -15,9 +15,10 @@ type importantSearch struct {
 	entries map[int]SearchSession
 }
 
-// BeginImportant edits an atomic batch of importance toggles, initially containing
-// the current parent tab followed by a space. It shares search's input handling,
-// completion preview and clock-driven cancellation, without switching tabs.
+// BeginImportant edits an atomic batch of importance toggles. An unmarked current
+// parent is prefilled with a trailing space; a marked parent starts empty.
+// It shares search's input handling, completion preview and clock-driven
+// cancellation, without switching tabs.
 func (p *SearchPrompt) BeginImportant(clk clock.Clock, onChange func(), currentID string, sessions []SearchSession) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -28,8 +29,10 @@ func (p *SearchPrompt) BeginImportant(clk clock.Clock, onChange func(), currentI
 	p.important = &importantSearch{entries: make(map[int]SearchSession)}
 	for _, session := range sessions {
 		if session.ID == currentID {
-			p.editor.text = []byte(session.Name + " ")
-			p.important.entries[0] = session
+			if !session.Marked {
+				p.editor.text = []byte(session.Name + " ")
+				p.important.entries[0] = session
+			}
 			break
 		}
 	}

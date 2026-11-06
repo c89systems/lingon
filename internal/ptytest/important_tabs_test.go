@@ -190,7 +190,7 @@ func TestImportantTabToggleAndNavigationPTY(t *testing.T) {
 				}
 			}
 			// Unmark alpha, leaving alpha-4 as the sole important tab.
-			viewer.Send("\x0ci\r\x0cnone-important\r")
+			viewer.Send("\x0cialpha\r\x0cnone-important\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:one-important") })
 			if !viewer.Screen().Contains("REPLY:tab-4") {
 				t.Fatal("toggle failed to remove alpha from cycling")
@@ -200,7 +200,7 @@ func TestImportantTabToggleAndNavigationPTY(t *testing.T) {
 				return s.Contains("REPLY:still-four") && s.Contains("REPLY:one-important")
 			})
 			// Removing the last mark restores normal cycling automatically.
-			viewer.Send("\x0c\x09\r\x0cnnormal-next\r")
+			viewer.Send("\x0c\x09alpha-4\r\x0cnnormal-next\r")
 			waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:normal-next") })
 			if !viewer.Screen().Contains("REPLY:tab-5") {
 				t.Fatal("last toggle did not leave important mode")

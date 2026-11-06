@@ -43,7 +43,7 @@ func TestImportantPromptBatchHostAndAttachPTY(t *testing.T) {
 				}
 			}
 			// Tab cycles within an entry; Space accepts it before the next entry.
-			viewer.Send("\x0c\x09\t")
+			viewer.Send("\x0c\x09alpha \t")
 			searchField(t, viewer, "i alpha alpha-2")
 			viewer.Send("\t")
 			searchField(t, viewer, "i alpha alpha-3")
@@ -99,7 +99,7 @@ func TestImportantPromptSingleAttachPTY(t *testing.T) {
 	searchField(t, viewer, "i single-important")
 	viewer.Send("\x17bad.name\x17single-important\r\x0c/\t")
 	searchField(t, viewer, "/ single-important")
-	viewer.Send("\x1b\x0ci\r\x0c/\t")
+	viewer.Send("\x1b\x0cisingle-important\r\x0c/\t")
 	searchField(t, viewer, "/ single-important")
 	viewer.Send("\x1bsingle-input\r")
 	waitSearchScreen(t, viewer, func(s ptytest.Screen) bool { return s.Contains("REPLY:single-input") })

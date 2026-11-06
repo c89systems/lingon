@@ -18,6 +18,8 @@ type SearchSession struct {
 	// Excluded omits a tab from suggestions and selection while preserving its
 	// position as a cycling origin in the full tab order.
 	Excluded bool
+	// Marked records existing importance without excluding explicit toggles.
+	Marked bool
 }
 
 // SearchView is an atomic snapshot of the search field and highlighted session.

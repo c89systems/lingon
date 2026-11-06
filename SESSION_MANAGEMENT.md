@@ -104,8 +104,10 @@ newline. Paste honors the destination application's bracketed-paste mode.
 
 Important-tab marks are UI-local, keyed by immutable session ID and shared by
 the local and remote tabs displayed in that UI. `Ctrl+l i` (also
-`Ctrl+l Ctrl+i`) opens a batch prompt prefilled with the parent tab and a trailing
-space. Enter toggles all listed tabs once without switching; Escape or Ctrl+C
+`Ctrl+l Ctrl+i`) opens a batch prompt. An unmarked parent is prefilled with a
+trailing space; an already marked parent starts empty to preserve its mark when
+adding other tabs. Empty Enter changes nothing; explicitly list a marked tab to
+remove its mark. Enter toggles all listed tabs once without switching; Escape or Ctrl+C
 cancels. Tab completes the current entry without adding a space, then cycles
 through tabs in that same entry; Shift+Tab cycles backwards. Each empty entry
 starts after the active tab with Tab, or before it with Shift+Tab, wrapping at

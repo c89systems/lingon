@@ -386,9 +386,12 @@ the window.
 
 #### Mark important tabs
 
-In the interactive host or `lingon attach`, `Ctrl+l i` opens the `i` prompt with
-the current tab's name and a trailing space. `Ctrl+l Ctrl+i` is an alias (the second
-key is also Tab). Enter immediately toggles the current tab. To toggle several
+In the interactive host or `lingon attach`, `Ctrl+l i` opens the `i` prompt.
+An unmarked current tab is prefilled with a trailing space; Enter marks it.
+If the current tab is already important, the prompt starts empty so adding other
+tabs preserves its mark. Empty Enter closes the prompt without changes. To remove
+an existing mark, explicitly include that tab's name in the list.
+`Ctrl+l Ctrl+i` is an alias (the second key is also Tab). To toggle several
 tabs together, type a name prefix to see its gray completion. Tab fills that
 completion without adding a space; further Tab presses cycle through all tabs
 within the same entry. Shift+Tab cycles backwards. On each empty entry, Tab

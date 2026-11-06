@@ -194,3 +194,48 @@ func TestImportantEmptyEntryCyclesRelativeToActiveTab(t *testing.T) {
 		})
 	}
 }
+
+func TestImportantMarkedParentStartsEmptyWithoutLosingCycleOrigin(t *testing.T) {
+	sessions := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "beta"}, {ID: "c", Name: "current", Marked: true}, {ID: "d", Name: "delta"}}
+	for _, tc := range []struct {
+		keys string
+		ids  []string
+	}{
+		{"\r", []string{}}, {"\t\r", []string{"d"}}, {"\x1b[Z\r", []string{"b"}},
+		{"delta\r", []string{"d"}}, {"current\r", []string{"c"}}, {"delta current\r", []string{"d", "c"}},
+	} {
+		t.Run(tc.keys, func(t *testing.T) {
+			var p SearchPrompt
+			p.BeginImportant(clock.NewMock(), nil, "c", sessions)
+			defer p.Close()
+			if view := p.View(sessions); !view.Active || !view.Important || view.Text != "" || view.Ghost != "" || view.CandidateID != "" {
+				t.Fatalf("marked prefill=%+v", view)
+			}
+			var result SearchResult
+			for _, key := range []byte(tc.keys) {
+				result = p.Feed(key, sessions)
+				p.View(sessions)
+			}
+			if p.View(sessions).Active || !reflect.DeepEqual(result.SessionIDs, tc.ids) {
+				t.Fatalf("result=%+v view=%+v", result, p.View(sessions))
+			}
+		})
+	}
+}
+
+func TestImportantPrefillUsesMarkIdentityRatherThanName(t *testing.T) {
+	sessions := []SearchSession{{ID: "a", Name: "same", Marked: true}, {ID: "b", Name: "same"}}
+	var p SearchPrompt
+	p.BeginImportant(clock.NewMock(), nil, "b", sessions)
+	defer p.Close()
+	if view := p.View(sessions); view.Text != "same " || view.CandidateID != "b" {
+		t.Fatalf("unmarked duplicate prefill=%+v", view)
+	}
+	p.BeginImportant(clock.NewMock(), nil, "a", sessions)
+	for _, key := range []byte("same\r") {
+		p.Feed(key, sessions)
+	}
+	if !p.View(sessions).Active {
+		t.Fatal("empty marked prefill retained an implicit duplicate identity")
+	}
+}

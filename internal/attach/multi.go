@@ -2046,7 +2046,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			if popups.Parent(s.ID) != "" {
 				continue
 			}
-			items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name), Excluded: filtered && !important.Contains(s.ID)})
+			items = append(items, control.SearchSession{ID: s.ID, Name: mvu.SessionLabel(s.ID, s.Name), Excluded: filtered && !important.Contains(s.ID), Marked: important.Contains(s.ID)})
 		}
 		return items
 	}

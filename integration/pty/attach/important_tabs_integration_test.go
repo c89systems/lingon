@@ -75,6 +75,22 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			wait(viewer, func(s ptytest.Screen) bool {
 				return color(viewer, "important-a").BG == active.BG && color(viewer, "important-b").BG != inactive.BG && viewer.Snapshot().Cells[99].BG != fill
 			})
+			// Reopening on marked A must add B without implicitly removing A.
+			viewer.Send("\x1b\x0ci")
+			field("i")
+			viewer.Send("important-b\r\x0c?")
+			field("?")
+			if color(viewer, "important-a").BG != active.BG || color(viewer, "important-b").BG != inactive.BG {
+				t.Fatal("adding B removed A or failed to mark B")
+			}
+			// Explicitly remove B to retain the important-only search scenario.
+			viewer.Send("\x1b\x0ci")
+			field("i")
+			viewer.Send("important-b\r\x0c?")
+			field("?")
+			if color(viewer, "important-a").BG != active.BG || color(viewer, "important-b").BG == inactive.BG {
+				t.Fatal("explicitly removing B changed A")
+			}
 			viewer.Send("\x1b\x0c/important-b\r")
 			field("/ important-b")
 			if strings.Contains(viewer.Screen().Row(0), "[") {
@@ -92,6 +108,14 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			})
 			if viewer.Snapshot().Cells[99].BG == fill {
 				t.Fatal("marking every tab left important mode")
+			}
+			// Popup focus still uses its already-marked parent's prefill policy.
+			viewer.Send("\x1b\x0ci")
+			field("i")
+			viewer.Send("\r\x0c?")
+			field("?")
+			if color(viewer, "important-b").BG != active.BG {
+				t.Fatal("empty popup-parent prompt removed the parent's mark")
 			}
 			viewer.Send("\x1b\x0cj\x0c/\t")
 			field("/ important-a")
@@ -124,8 +148,8 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 				t.Fatal("batch completion did not mark both tabs")
 			}
 			viewer.Send("\x1b\x0ci")
-			field("i important-b")
-			viewer.Send("\x17important-a important-b")
+			field("i")
+			viewer.Send("important-a important-b")
 			field("i important-a important-b")
 			viewer.Send("\r\x0c?")
 			field("?")
