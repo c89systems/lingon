@@ -83,6 +83,8 @@ func protoSnapshotFromTerminalSnapshot(s terminal.Snapshot) (*protocolpb.Snapsho
 		Title:          s.Title,
 	}
 	hasGrapheme := false
+	hyperlinks := make([]string, size)
+	hasHyperlinks := false
 	for i := 0; i < size; i++ {
 		cell := s.Cells[i]
 		out.Runes[i] = uint32(cell.Rune)
@@ -90,9 +92,14 @@ func protoSnapshotFromTerminalSnapshot(s terminal.Snapshot) (*protocolpb.Snapsho
 		out.Fg[i] = cell.FG
 		out.Bg[i] = cell.BG
 		out.UnderlineColor[i] = cell.UnderlineColor
+		hyperlinks[i] = cell.Hyperlink
+		hasHyperlinks = hasHyperlinks || cell.Hyperlink != ""
 		if cell.Grapheme != "" {
 			hasGrapheme = true
 		}
+	}
+	if hasHyperlinks {
+		out.Hyperlinks = hyperlinks
 	}
 	if hasGrapheme {
 		out.Graphemes = make([]string, size)

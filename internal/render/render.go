@@ -912,6 +912,7 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 			r := ' '
 			g := ""
 			span := 0
+			linked := false
 			if cx >= 0 && cy >= 0 && cx < cols && cy < rows {
 				idx := cy*cols + cx
 				g = graphemeAt(snap, idx)
@@ -929,6 +930,8 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 					attr.bg = snap.Bg[idx]
 				}
 				attr.underlineColor = colorAt(snap.UnderlineColor, idx)
+				attr.hyperlink = hyperlinkAt(snap, idx)
+				linked = attr.hyperlink != ""
 				if x+1 < viewCols && isContinuationCell(snap, idx+1, attr) {
 					span = 1
 				}
@@ -937,7 +940,7 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 					r = ' '
 				}
 			}
-			if g != "" || (r != 0 && r != ' ') {
+			if g != "" || (r != 0 && r != ' ') || linked {
 				if x > last {
 					last = x
 				}
@@ -948,6 +951,7 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 		}
 		var rowBuilder strings.Builder
 		rowBuilder.WriteString(dimOn)
+		currentHyperlink := ""
 		if last < 0 {
 			rowBuilder.WriteString(ansiClearLine)
 		} else {
@@ -973,6 +977,7 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 						attr.bg = snap.Bg[idx]
 					}
 					attr.underlineColor = colorAt(snap.UnderlineColor, idx)
+					attr.hyperlink = hyperlinkAt(snap, idx)
 					if x+1 < viewCols && isContinuationCell(snap, idx+1, attr) {
 						skipNext = true
 					}
@@ -981,6 +986,12 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 						r = ' '
 					}
 				}
+				link := ""
+				if cx >= 0 && cy >= 0 && cx < cols && cy < rows {
+					link = hyperlinkAt(snap, cy*cols+cx)
+				}
+				rowBuilder.WriteString(hyperlinkTransition(currentHyperlink, link))
+				currentHyperlink = link
 				if g != "" {
 					rowBuilder.WriteString(g)
 				} else {
@@ -993,6 +1004,7 @@ func SnapshotViewportDim(w io.Writer, snap *protocolpb.Snapshot, viewCols, viewR
 					x++
 				}
 			}
+			rowBuilder.WriteString(hyperlinkTransition(currentHyperlink, ""))
 			if last < viewCols-1 {
 				rowBuilder.WriteString(ansiClearLine)
 			}
@@ -1010,10 +1022,11 @@ type renderAttr struct {
 	fg             uint32
 	bg             uint32
 	underlineColor uint32
+	hyperlink      string
 }
 
 func attrEqual(a, b renderAttr) bool {
-	return a.mode == b.mode && a.fg == b.fg && a.bg == b.bg && a.underlineColor == b.underlineColor
+	return a.mode == b.mode && a.fg == b.fg && a.bg == b.bg && a.underlineColor == b.underlineColor && a.hyperlink == b.hyperlink
 }
 
 func cellEqual(prev, snap *protocolpb.Snapshot, row, col, cols, rows int) bool {
@@ -1021,6 +1034,9 @@ func cellEqual(prev, snap *protocolpb.Snapshot, row, col, cols, rows int) bool {
 		return true
 	}
 	idx := row*cols + col
+	if hyperlinkAt(prev, idx) != hyperlinkAt(snap, idx) {
+		return false
+	}
 	prevG := graphemeAt(prev, idx)
 	nextG := graphemeAt(snap, idx)
 	if prevG != "" || nextG != "" {
@@ -1152,6 +1168,7 @@ func lastNonDefaultCol(snap *protocolpb.Snapshot, row, x0, viewCols, cols, rows 
 				attr.bg = snap.Bg[idx]
 			}
 			attr.underlineColor = colorAt(snap.UnderlineColor, idx)
+			attr.hyperlink = hyperlinkAt(snap, idx)
 			wide := false
 			if g != "" {
 				wide = runewidth.StringWidth(g) > 1
@@ -1209,6 +1226,7 @@ func buildRow(snap *protocolpb.Snapshot, row, x0, viewCols, cols, rows int, defa
 				attr.bg = snap.Bg[idx]
 			}
 			attr.underlineColor = colorAt(snap.UnderlineColor, idx)
+			attr.hyperlink = hyperlinkAt(snap, idx)
 			wide := false
 			if g != "" {
 				wide = runewidth.StringWidth(g) > 1
@@ -1224,7 +1242,7 @@ func buildRow(snap *protocolpb.Snapshot, row, x0, viewCols, cols, rows int, defa
 			r = ' '
 		}
 		if !attrEqual(current, attr) {
-			rowBuilder.WriteString(sgr(attr))
+			rowBuilder.WriteString(attrTransition(current, attr))
 			current = attr
 		}
 		if g != "" {
@@ -1241,11 +1259,11 @@ func buildRow(snap *protocolpb.Snapshot, row, x0, viewCols, cols, rows int, defa
 	}
 	if last < viewCols-1 {
 		if !attrEqual(current, defaultAttr) {
-			rowBuilder.WriteString(sgr(defaultAttr))
+			rowBuilder.WriteString(attrTransition(current, defaultAttr))
 		}
 		rowBuilder.WriteString(ansiClearLine)
 	} else if !attrEqual(current, defaultAttr) {
-		rowBuilder.WriteString(ansiReset)
+		rowBuilder.WriteString(hyperlinkTransition(current.hyperlink, "") + ansiReset)
 	}
 	return rowBuilder.String()
 }
@@ -1278,6 +1296,7 @@ func buildRowSpan(snap *protocolpb.Snapshot, row, x0, start, end, cols, rows int
 				attr.bg = snap.Bg[idx]
 			}
 			attr.underlineColor = colorAt(snap.UnderlineColor, idx)
+			attr.hyperlink = hyperlinkAt(snap, idx)
 			wide := false
 			if g != "" {
 				wide = runewidth.StringWidth(g) > 1
@@ -1293,7 +1312,7 @@ func buildRowSpan(snap *protocolpb.Snapshot, row, x0, start, end, cols, rows int
 			r = ' '
 		}
 		if !attrEqual(current, attr) {
-			rowBuilder.WriteString(sgr(attr))
+			rowBuilder.WriteString(attrTransition(current, attr))
 			current = attr
 		}
 		if g != "" {
@@ -1309,7 +1328,7 @@ func buildRowSpan(snap *protocolpb.Snapshot, row, x0, start, end, cols, rows int
 		}
 	}
 	if !attrEqual(current, defaultAttr) {
-		rowBuilder.WriteString(sgr(defaultAttr))
+		rowBuilder.WriteString(attrTransition(current, defaultAttr))
 	}
 	return rowBuilder.String()
 }
@@ -1338,6 +1357,9 @@ func isContinuationCell(snap *protocolpb.Snapshot, idx int, attr renderAttr) boo
 		return false
 	}
 	if idx < len(snap.Fg) && snap.Fg[idx] != attr.fg {
+		return false
+	}
+	if hyperlinkAt(snap, idx) != attr.hyperlink {
 		return false
 	}
 	if colorAt(snap.UnderlineColor, idx) != attr.underlineColor {
@@ -1608,4 +1630,20 @@ func underlineColorCode(color uint32) []string {
 	}
 	// Each attribute run starts with SGR 0, which also resets underline color.
 	return nil
+}
+
+func hyperlinkAt(snap *protocolpb.Snapshot, idx int) string {
+	if snap != nil && idx >= 0 && idx < len(snap.Hyperlinks) {
+		return terminal.NormalizeHyperlink(snap.Hyperlinks[idx])
+	}
+	return ""
+}
+func hyperlinkTransition(from, to string) string {
+	if from == to {
+		return ""
+	}
+	return terminal.HyperlinkSequence(to)
+}
+func attrTransition(from, to renderAttr) string {
+	return hyperlinkTransition(from.hyperlink, to.hyperlink) + sgr(to)
 }

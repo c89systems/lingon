@@ -658,6 +658,9 @@ func snapshotToScrollbackRows(snap *protocolpb.Snapshot) []terminal.ScrollbackRo
 			if idx < len(snap.Bg) {
 				cell.BG = snap.Bg[idx]
 			}
+			if idx < len(snap.Hyperlinks) {
+				cell.Hyperlink = snap.Hyperlinks[idx]
+			}
 			if idx < len(snap.UnderlineColor) {
 				cell.UnderlineColor = snap.UnderlineColor[idx]
 			}
@@ -1459,7 +1462,11 @@ func snapshotCellKey(snap *protocolpb.Snapshot, idx int) string {
 	if idx < len(snap.GetGraphemes()) {
 		grapheme = snap.GetGraphemes()[idx]
 	}
-	return fmt.Sprintf("%d/%d/%d/%d/%s", runeVal, modeVal, fgVal, bgVal, grapheme)
+	var link string
+	if idx < len(snap.Hyperlinks) {
+		link = snap.Hyperlinks[idx]
+	}
+	return fmt.Sprintf("%d/%d/%d/%d/%s/%q", runeVal, modeVal, fgVal, bgVal, grapheme, link)
 }
 
 func mergePreservedSnapshotAt(prev, current *protocolpb.Snapshot, originCol, originRow, overlayCols, overlayRows int) *protocolpb.Snapshot {
@@ -1552,6 +1559,7 @@ func cloneSnapshot(snap *protocolpb.Snapshot) *protocolpb.Snapshot {
 		Modes:          append([]int32(nil), snap.GetModes()...),
 		Fg:             append([]uint32(nil), snap.GetFg()...),
 		UnderlineColor: append([]uint32(nil), snap.GetUnderlineColor()...),
+		Hyperlinks:     append([]string(nil), snap.GetHyperlinks()...),
 		Bg:             append([]uint32(nil), snap.GetBg()...),
 		CursorVisible:  snap.GetCursorVisible(),
 		Mode:           snap.GetMode(),
@@ -1715,6 +1723,9 @@ func copySnapshotRegionFromOffset(dst, src *protocolpb.Snapshot, originCol, orig
 	if rows <= 0 || cols <= 0 {
 		return
 	}
+	if (len(src.Hyperlinks) > 0 || len(dst.Hyperlinks) > 0) && len(dst.Hyperlinks) == 0 {
+		dst.Hyperlinks = make([]string, dstCols*dstRows)
+	}
 	if len(dst.UnderlineColor) == 0 {
 		dst.UnderlineColor = make([]uint32, dstCols*dstRows)
 	}
@@ -1738,6 +1749,12 @@ func copySnapshotRegionFromOffset(dst, src *protocolpb.Snapshot, originCol, orig
 			}
 			if srcIdx < len(src.Bg) {
 				dst.Bg[dstIdx] = src.Bg[srcIdx]
+			}
+			if len(dst.Hyperlinks) > 0 {
+				dst.Hyperlinks[dstIdx] = ""
+				if srcIdx < len(src.Hyperlinks) {
+					dst.Hyperlinks[dstIdx] = src.Hyperlinks[srcIdx]
+				}
 			}
 			if srcIdx < len(src.UnderlineColor) {
 				dst.UnderlineColor[dstIdx] = src.UnderlineColor[srcIdx]
@@ -1780,6 +1797,9 @@ func copySnapshotRegionAtOffset(dst, src *protocolpb.Snapshot, originCol, origin
 	if rows <= 0 || cols <= 0 {
 		return
 	}
+	if (len(src.Hyperlinks) > 0 || len(dst.Hyperlinks) > 0) && len(dst.Hyperlinks) == 0 {
+		dst.Hyperlinks = make([]string, dstCols*dstRows)
+	}
 	if len(dst.UnderlineColor) == 0 {
 		dst.UnderlineColor = make([]uint32, dstCols*dstRows)
 	}
@@ -1803,6 +1823,12 @@ func copySnapshotRegionAtOffset(dst, src *protocolpb.Snapshot, originCol, origin
 			}
 			if srcIdx < len(src.Bg) {
 				dst.Bg[dstIdx] = src.Bg[srcIdx]
+			}
+			if len(dst.Hyperlinks) > 0 {
+				dst.Hyperlinks[dstIdx] = ""
+				if srcIdx < len(src.Hyperlinks) {
+					dst.Hyperlinks[dstIdx] = src.Hyperlinks[srcIdx]
+				}
 			}
 			if srcIdx < len(src.UnderlineColor) {
 				dst.UnderlineColor[dstIdx] = src.UnderlineColor[srcIdx]

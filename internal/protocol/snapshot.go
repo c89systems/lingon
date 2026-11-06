@@ -13,10 +13,14 @@ func SnapshotToProto(s terminal.Snapshot) *protocolpb.Snapshot {
 	bg := make([]uint32, 0, len(s.Cells))
 	underlineColor := make([]uint32, 0, len(s.Cells))
 	hasUnderlineColor := false
+	hyperlinks := make([]string, len(s.Cells))
+	hasHyperlinks := false
 	graphemes := make([]string, len(s.Cells))
 	hasGraphemes := false
 
 	for i, cell := range s.Cells {
+		hyperlinks[i] = cell.Hyperlink
+		hasHyperlinks = hasHyperlinks || cell.Hyperlink != ""
 		runes = append(runes, uint32(cell.Rune))
 		modes = append(modes, int32(cell.Mode))
 		fg = append(fg, cell.FG)
@@ -27,6 +31,9 @@ func SnapshotToProto(s terminal.Snapshot) *protocolpb.Snapshot {
 			graphemes[i] = cell.Grapheme
 			hasGraphemes = true
 		}
+	}
+	if !hasHyperlinks {
+		hyperlinks = nil
 	}
 	if !hasUnderlineColor {
 		underlineColor = nil
@@ -42,6 +49,7 @@ func SnapshotToProto(s terminal.Snapshot) *protocolpb.Snapshot {
 		Modes:          modes,
 		Fg:             fg,
 		UnderlineColor: underlineColor,
+		Hyperlinks:     hyperlinks,
 		Bg:             bg,
 		Cursor:         &protocolpb.Cursor{X: uint32(s.Cursor.X), Y: uint32(s.Cursor.Y)},
 		CursorVisible:  s.CursorVisible,
@@ -68,6 +76,9 @@ func SnapshotFromProto(snap *protocolpb.Snapshot) terminal.Snapshot {
 		}
 		if i < len(snap.Fg) {
 			cells[i].FG = snap.Fg[i]
+		}
+		if i < len(snap.Hyperlinks) {
+			cells[i].Hyperlink = terminal.NormalizeHyperlink(snap.Hyperlinks[i])
 		}
 		if i < len(snap.UnderlineColor) {
 			cells[i].UnderlineColor = snap.UnderlineColor[i]

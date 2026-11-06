@@ -384,6 +384,15 @@ the active tab and prior bar visibility. Outside search, the bar scrolls
 automatically to keep the active tab visible when switching tabs or resizing
 the window.
 
+#### Hyperlinks
+
+The desktop host and `lingon attach` preserve [OSC 8 hyperlinks](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)
+through snapshots, updates, tab switches, overlays and scrollback. Link labels
+keep the application's styling; ordinary underlines do not become hyperlinks.
+Use your outer terminal emulator's usual hyperlink gesture to open a target.
+The publishing host or `lingonx` and attach must both run a build with this support;
+an older host has already discarded the targets before attach receives the screen.
+
 #### Mark important tabs
 
 In the interactive host or `lingon attach`, `Ctrl+l i` opens the `i` prompt.

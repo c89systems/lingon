@@ -767,8 +767,10 @@ type Snapshot struct {
 	Graphemes     []string               `protobuf:"bytes,11,rep,name=graphemes,proto3" json:"graphemes,omitempty"`
 	// Same color encoding as fg/bg; absent or zero follows the foreground.
 	UnderlineColor []uint32 `protobuf:"varint,12,rep,packed,name=underline_color,json=underlineColor,proto3" json:"underline_color,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Per-cell OSC 8 params;URI payloads. Empty entries are not hyperlinks.
+	Hyperlinks    []string `protobuf:"bytes,13,rep,name=hyperlinks,proto3" json:"hyperlinks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Snapshot) Reset() {
@@ -885,6 +887,13 @@ func (x *Snapshot) GetUnderlineColor() []uint32 {
 	return nil
 }
 
+func (x *Snapshot) GetHyperlinks() []string {
+	if x != nil {
+		return x.Hyperlinks
+	}
+	return nil
+}
+
 type DiffRow struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Row            uint32                 `protobuf:"varint,1,opt,name=row,proto3" json:"row,omitempty"`
@@ -894,6 +903,7 @@ type DiffRow struct {
 	Bg             []uint32               `protobuf:"varint,5,rep,packed,name=bg,proto3" json:"bg,omitempty"`
 	Graphemes      []string               `protobuf:"bytes,6,rep,name=graphemes,proto3" json:"graphemes,omitempty"`
 	UnderlineColor []uint32               `protobuf:"varint,7,rep,packed,name=underline_color,json=underlineColor,proto3" json:"underline_color,omitempty"`
+	Hyperlinks     []string               `protobuf:"bytes,8,rep,name=hyperlinks,proto3" json:"hyperlinks,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -973,6 +983,13 @@ func (x *DiffRow) GetGraphemes() []string {
 func (x *DiffRow) GetUnderlineColor() []uint32 {
 	if x != nil {
 		return x.UnderlineColor
+	}
+	return nil
+}
+
+func (x *DiffRow) GetHyperlinks() []string {
+	if x != nil {
+		return x.Hyperlinks
 	}
 	return nil
 }
@@ -1077,6 +1094,7 @@ type ScrollbackRow struct {
 	Bg             []uint32               `protobuf:"varint,4,rep,packed,name=bg,proto3" json:"bg,omitempty"`
 	Graphemes      []string               `protobuf:"bytes,5,rep,name=graphemes,proto3" json:"graphemes,omitempty"`
 	UnderlineColor []uint32               `protobuf:"varint,6,rep,packed,name=underline_color,json=underlineColor,proto3" json:"underline_color,omitempty"`
+	Hyperlinks     []string               `protobuf:"bytes,7,rep,name=hyperlinks,proto3" json:"hyperlinks,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1149,6 +1167,13 @@ func (x *ScrollbackRow) GetGraphemes() []string {
 func (x *ScrollbackRow) GetUnderlineColor() []uint32 {
 	if x != nil {
 		return x.UnderlineColor
+	}
+	return nil
+}
+
+func (x *ScrollbackRow) GetHyperlinks() []string {
+	if x != nil {
+		return x.Hyperlinks
 	}
 	return nil
 }
@@ -2098,7 +2123,7 @@ const file_internal_protocolpb_relay_proto_rawDesc = "" +
 	"serverCols\x12\x1f\n" +
 	"\vserver_rows\x18\x03 \x01(\rR\n" +
 	"serverRows\x12(\n" +
-	"\x10holder_client_id\x18\x04 \x01(\tR\x0eholderClientId\"\xdb\x02\n" +
+	"\x10holder_client_id\x18\x04 \x01(\tR\x0eholderClientId\"\xfb\x02\n" +
 	"\bSnapshot\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\rR\x04rows\x12\x18\n" +
@@ -2112,7 +2137,10 @@ const file_internal_protocolpb_relay_proto_rawDesc = "" +
 	"\x05title\x18\n" +
 	" \x01(\tR\x05title\x12\x1c\n" +
 	"\tgraphemes\x18\v \x03(\tR\tgraphemes\x12+\n" +
-	"\x0funderline_color\x18\f \x03(\rB\x02\x10\x01R\x0eunderlineColor\"\xc2\x01\n" +
+	"\x0funderline_color\x18\f \x03(\rB\x02\x10\x01R\x0eunderlineColor\x12\x1e\n" +
+	"\n" +
+	"hyperlinks\x18\r \x03(\tR\n" +
+	"hyperlinks\"\xe2\x01\n" +
 	"\aDiffRow\x12\x10\n" +
 	"\x03row\x18\x01 \x01(\rR\x03row\x12\x18\n" +
 	"\x05runes\x18\x02 \x03(\rB\x02\x10\x01R\x05runes\x12\x18\n" +
@@ -2120,7 +2148,10 @@ const file_internal_protocolpb_relay_proto_rawDesc = "" +
 	"\x02fg\x18\x04 \x03(\rB\x02\x10\x01R\x02fg\x12\x12\n" +
 	"\x02bg\x18\x05 \x03(\rB\x02\x10\x01R\x02bg\x12\x1c\n" +
 	"\tgraphemes\x18\x06 \x03(\tR\tgraphemes\x12+\n" +
-	"\x0funderline_color\x18\a \x03(\rB\x02\x10\x01R\x0eunderlineColor\"\xe7\x01\n" +
+	"\x0funderline_color\x18\a \x03(\rB\x02\x10\x01R\x0eunderlineColor\x12\x1e\n" +
+	"\n" +
+	"hyperlinks\x18\b \x03(\tR\n" +
+	"hyperlinks\"\xe7\x01\n" +
 	"\x04Diff\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\rR\x04rows\x125\n" +
@@ -2128,14 +2159,17 @@ const file_internal_protocolpb_relay_proto_rawDesc = "" +
 	"\x06cursor\x18\x04 \x01(\v2\x17.lingon.protocol.CursorR\x06cursor\x12%\n" +
 	"\x0ecursor_visible\x18\x05 \x01(\bR\rcursorVisible\x12\x12\n" +
 	"\x04mode\x18\x06 \x01(\rR\x04mode\x12\x14\n" +
-	"\x05title\x18\a \x01(\tR\x05title\"\xb6\x01\n" +
+	"\x05title\x18\a \x01(\tR\x05title\"\xd6\x01\n" +
 	"\rScrollbackRow\x12\x18\n" +
 	"\x05runes\x18\x01 \x03(\rB\x02\x10\x01R\x05runes\x12\x18\n" +
 	"\x05modes\x18\x02 \x03(\x05B\x02\x10\x01R\x05modes\x12\x12\n" +
 	"\x02fg\x18\x03 \x03(\rB\x02\x10\x01R\x02fg\x12\x12\n" +
 	"\x02bg\x18\x04 \x03(\rB\x02\x10\x01R\x02bg\x12\x1c\n" +
 	"\tgraphemes\x18\x05 \x03(\tR\tgraphemes\x12+\n" +
-	"\x0funderline_color\x18\x06 \x03(\rB\x02\x10\x01R\x0eunderlineColor\"j\n" +
+	"\x0funderline_color\x18\x06 \x03(\rB\x02\x10\x01R\x0eunderlineColor\x12\x1e\n" +
+	"\n" +
+	"hyperlinks\x18\a \x03(\tR\n" +
+	"hyperlinks\"j\n" +
 	"\n" +
 	"Scrollback\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x14\n" +

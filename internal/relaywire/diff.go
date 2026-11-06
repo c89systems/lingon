@@ -42,6 +42,9 @@ func DiffSnapshots(prev, next *protocolpb.Snapshot) (*protocolpb.Diff, bool) {
 				break
 			}
 		}
+		if len(prev.Hyperlinks) > 0 || len(next.Hyperlinks) > 0 {
+			row.Hyperlinks = nextRowStrings(next.Hyperlinks, y, cols)
+		}
 		if includeGraphemes {
 			row.Graphemes = nextRowStrings(next.Graphemes, y, cols)
 		}
@@ -63,6 +66,9 @@ func DiffSnapshots(prev, next *protocolpb.Snapshot) (*protocolpb.Diff, bool) {
 func rowChanged(prev, next *protocolpb.Snapshot, row, cols int) bool {
 	for x := 0; x < cols; x++ {
 		idx := row*cols + x
+		if hyperlinkAt(prev, idx) != hyperlinkAt(next, idx) {
+			return true
+		}
 		prevG := graphemeAt(prev, idx)
 		nextG := graphemeAt(next, idx)
 		if prevG != "" || nextG != "" {
@@ -165,4 +171,11 @@ func colorAt(colors []uint32, idx int) uint32 {
 		return colors[idx]
 	}
 	return 0
+}
+
+func hyperlinkAt(snap *protocolpb.Snapshot, idx int) string {
+	if idx >= 0 && idx < len(snap.Hyperlinks) {
+		return snap.Hyperlinks[idx]
+	}
+	return ""
 }

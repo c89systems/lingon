@@ -19,6 +19,7 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 	fg := make([]uint32, size)
 	bg := make([]uint32, size)
 	underlineColor := make([]uint32, size)
+	hyperlinks := make([]string, size)
 	var graphemes []string
 	hasGraphemes := false
 	if len(live.Graphemes) > 0 {
@@ -42,6 +43,7 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 			fg[idx] = cell.FG
 			bg[idx] = cell.BG
 			underlineColor[idx] = cell.UnderlineColor
+			hyperlinks[idx] = cell.Hyperlink
 			if graphemes != nil && cell.Grapheme != "" {
 				graphemes[idx] = cell.Grapheme
 				hasGraphemes = true
@@ -76,6 +78,9 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 					if idx < len(live.Bg) {
 						bg[dst] = live.Bg[idx]
 					}
+					if idx < len(live.Hyperlinks) {
+						hyperlinks[dst] = live.Hyperlinks[idx]
+					}
 					if idx < len(live.UnderlineColor) {
 						underlineColor[dst] = live.UnderlineColor[idx]
 					}
@@ -90,7 +95,14 @@ func BuildScrollbackViewFromTerminal(cols, viewRows int, scrollback []terminal.S
 		}
 		normalizeTrailingBlankAttrs(viewRow, cols, runes, modes, fg, bg, underlineColor, graphemes)
 	}
-	return finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, underlineColor, graphemes, hasGraphemes)
+	out := finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, underlineColor, graphemes, hasGraphemes)
+	for _, link := range hyperlinks {
+		if link != "" {
+			out.Hyperlinks = hyperlinks
+			break
+		}
+	}
+	return out
 }
 
 // BuildScrollbackViewFromProto composes a snapshot view that includes protocol
@@ -107,6 +119,7 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 	fg := make([]uint32, size)
 	bg := make([]uint32, size)
 	underlineColor := make([]uint32, size)
+	hyperlinks := make([]string, size)
 	var graphemes []string
 	hasGraphemes := false
 	if len(live.Graphemes) > 0 {
@@ -132,6 +145,9 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 			}
 			if srcCol >= 0 && srcCol < len(row.Bg) {
 				bg[idx] = row.Bg[srcCol]
+			}
+			if srcCol >= 0 && srcCol < len(row.Hyperlinks) {
+				hyperlinks[idx] = row.Hyperlinks[srcCol]
 			}
 			if srcCol >= 0 && srcCol < len(row.UnderlineColor) {
 				underlineColor[idx] = row.UnderlineColor[srcCol]
@@ -172,6 +188,9 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 					if idx < len(live.Bg) {
 						bg[dst] = live.Bg[idx]
 					}
+					if idx < len(live.Hyperlinks) {
+						hyperlinks[dst] = live.Hyperlinks[idx]
+					}
 					if idx < len(live.UnderlineColor) {
 						underlineColor[dst] = live.UnderlineColor[idx]
 					}
@@ -186,7 +205,14 @@ func BuildScrollbackViewFromProto(cols, viewRows int, scrollback []*protocolpb.S
 		}
 		normalizeTrailingBlankAttrs(viewRow, cols, runes, modes, fg, bg, underlineColor, graphemes)
 	}
-	return finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, underlineColor, graphemes, hasGraphemes)
+	out := finalizeScrollbackView(cols, viewRows, start, len(scrollback), live, runes, modes, fg, bg, underlineColor, graphemes, hasGraphemes)
+	for _, link := range hyperlinks {
+		if link != "" {
+			out.Hyperlinks = hyperlinks
+			break
+		}
+	}
+	return out
 }
 
 func normalizeTrailingBlankAttrs(row, cols int, runes []uint32, modes []int32, fg []uint32, bg []uint32, underlineColor []uint32, graphemes []string) {

@@ -23,6 +23,8 @@ type Cell struct {
 	FG             uint32
 	BG             uint32
 	UnderlineColor uint32
+	// Hyperlink is the OSC 8 params;URI payload; empty means ordinary text.
+	Hyperlink string
 }
 
 // Snapshot captures terminal state for resync.

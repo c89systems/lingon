@@ -31,7 +31,8 @@ type Emulator struct {
 	appCursor      bool
 	bracketedPaste bool
 
-	attr cellAttr
+	hyperlink string
+	attr      cellAttr
 
 	parser parserState
 
@@ -256,6 +257,7 @@ func (e *Emulator) LoadSnapshot(snap terminal.Snapshot) {
 	e.newLineMode = false
 	e.tabStops = defaultTabs(cols)
 	e.resetAttributes()
+	e.hyperlink = ""
 	e.inlineOriginRow = 0
 	e.inlineOriginSet = false
 }
@@ -551,7 +553,8 @@ func (e *Emulator) handleOSCByte(b byte) {
 		e.parser.oscEsc = true
 		return
 	}
-	if b == 0x07 {
+	// A raw C1 ST terminates OSC, but 0x9c can also continue a UTF-8 rune.
+	if b == 0x07 || (b == 0x9c && utf8.Valid(e.parser.oscBuf)) {
 		e.parser.state = stateGround
 		e.handleOSC()
 		return
@@ -625,6 +628,9 @@ func (e *Emulator) handlePrintableByte(b byte) {
 func (e *Emulator) handleOSC() {
 	old := e.snapshotState()
 	code, payload := parseOSC(e.parser.oscBuf)
+	if code == 8 {
+		e.hyperlink = terminal.NormalizeHyperlink(payload)
+	}
 	if code == 0 || code == 2 {
 		e.title = payload
 	}
@@ -807,6 +813,7 @@ func (e *Emulator) setCell(x, y int, r rune, grapheme string, width int) {
 		FG:             e.attr.fg,
 		BG:             e.attr.bg,
 		UnderlineColor: e.attr.underlineColor,
+		Hyperlink:      e.hyperlink,
 	}
 	if width == 2 && x+1 < e.cols {
 		contIdx := e.scr.index(x+1, y)
@@ -816,6 +823,7 @@ func (e *Emulator) setCell(x, y int, r rune, grapheme string, width int) {
 			FG:             e.attr.fg,
 			BG:             e.attr.bg,
 			UnderlineColor: e.attr.underlineColor,
+			Hyperlink:      e.hyperlink,
 		}
 	}
 }
@@ -1526,6 +1534,7 @@ func (e *Emulator) resetAttributes() {
 }
 
 func (e *Emulator) reset() {
+	e.hyperlink = ""
 	e.resetAttributes()
 	e.wrapMode = true
 	e.originMode = false

@@ -1223,6 +1223,7 @@ func shiftScrollbackLive(snap *protocolpb.Snapshot, rows int) *protocolpb.Snapsh
 	shiftScrollbackCells(next.Bg, count)
 	shiftScrollbackCells(next.UnderlineColor, count)
 	shiftScrollbackCells(next.Graphemes, count)
+	shiftScrollbackCells(next.Hyperlinks, count)
 	return next
 }
 
@@ -1443,6 +1444,14 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 	}
 
 	snap := c.lastSnapshot
+	if len(snap.Hyperlinks) == 0 {
+		for _, row := range diff.DiffRows {
+			if len(row.Hyperlinks) > 0 {
+				snap.Hyperlinks = make([]string, cols*rows)
+				break
+			}
+		}
+	}
 	if len(snap.UnderlineColor) == 0 {
 		snap.UnderlineColor = make([]uint32, cols*rows)
 	}
@@ -1473,6 +1482,12 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 			}
 			if x < len(row.Bg) {
 				snap.Bg[idx] = row.Bg[x]
+			}
+			if len(snap.Hyperlinks) > 0 {
+				snap.Hyperlinks[idx] = ""
+				if x < len(row.Hyperlinks) {
+					snap.Hyperlinks[idx] = row.Hyperlinks[x]
+				}
 			}
 			if x < len(row.UnderlineColor) {
 				snap.UnderlineColor[idx] = row.UnderlineColor[x]

@@ -83,6 +83,8 @@ message Snapshot {
   repeated string graphemes = 11;
   // Same color encoding as fg/bg; absent or zero follows the foreground.
   repeated uint32 underline_color = 12 [packed = true];
+  // Per-cell OSC 8 params;URI payloads. Empty entries are not hyperlinks.
+  repeated string hyperlinks = 13;
 }
 
 message DiffRow {
@@ -93,6 +95,7 @@ message DiffRow {
   repeated uint32 bg = 5 [packed = true];
   repeated string graphemes = 6;
   repeated uint32 underline_color = 7 [packed = true];
+  repeated string hyperlinks = 8;
 }
 
 message Diff {
@@ -112,6 +115,7 @@ message ScrollbackRow {
   repeated uint32 bg = 4 [packed = true];
   repeated string graphemes = 5;
   repeated uint32 underline_color = 6 [packed = true];
+  repeated string hyperlinks = 7;
 }
 
 message Scrollback {

@@ -190,6 +190,13 @@ func copyPopupCells(dst *protocolpb.Snapshot, row int, src *protocolpb.Snapshot)
 	}
 	clear(dst.UnderlineColor[start : start+len(src.Runes)])
 	copy(dst.UnderlineColor[start:], src.UnderlineColor)
+	if len(src.Hyperlinks) > 0 && len(dst.Hyperlinks) == 0 {
+		dst.Hyperlinks = make([]string, len(dst.Runes))
+	}
+	if len(dst.Hyperlinks) > 0 {
+		clear(dst.Hyperlinks[start : start+len(src.Runes)])
+		copy(dst.Hyperlinks[start:], src.Hyperlinks)
+	}
 	if len(src.Graphemes) != 0 && len(dst.Graphemes) == 0 {
 		dst.Graphemes = make([]string, len(dst.Runes))
 	}
