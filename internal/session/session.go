@@ -30,6 +30,7 @@ import (
 	"pkt.systems/lingon/internal/netgate"
 	"pkt.systems/lingon/internal/protocol"
 	"pkt.systems/lingon/internal/protocolpb"
+	"pkt.systems/lingon/internal/pty"
 	"pkt.systems/lingon/internal/publisher"
 	"pkt.systems/lingon/internal/relayclient"
 	"pkt.systems/lingon/internal/relaywire"
@@ -1637,6 +1638,12 @@ func writeAll(ctx context.Context, w io.Writer, data []byte, clk clock.Clock) er
 		}
 		if err != nil {
 			if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
+				if conn, ok := w.(syscall.Conn); ok {
+					if err := pty.WaitWritable(ctx, conn); err != nil {
+						return err
+					}
+					continue
+				}
 				if ctx != nil {
 					select {
 					case <-ctx.Done():

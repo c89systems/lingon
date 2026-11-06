@@ -1,7 +1,10 @@
 package ptytest_test
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"pkt.systems/lingon/internal/clock"
@@ -118,16 +121,40 @@ func TestHostDefaultRemoteResizePolicyPTY(t *testing.T) {
 }
 
 func TestHostRestoreLocalTabsAndPopupPTY(t *testing.T) {
+	// A child-emitted PID fences slave-PTY startup without advancing mock time.
+	// Each child remains alive, so its PID cannot be reused by another tab.
+	shell := filepath.Join(t.TempDir(), "ready-shell")
+	target := "'" + strings.ReplaceAll(restoreShell(t), "'", "'\\''") + "'"
+	script := "#!/bin/sh\nprintf '\\nCHILD_READY:%s\\n' \"$$\"\nexec " + target + "\n"
+	if err := os.WriteFile(shell, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
 	h := ptytest.New(t, ptytest.WithClock(clock.NewMock()))
-	host := h.StartHost(ptytest.HostOptions{SessionID: "home", SessionName: "home", Cols: 80, Rows: 24, Shell: restoreShell(t), Restore: true, DisablePublish: true})
+	host := h.StartHost(ptytest.HostOptions{SessionID: "home", SessionName: "home", Cols: 80, Rows: 24, Shell: shell, Restore: true, DisablePublish: true})
 	t.Cleanup(host.Cancel)
 	waitSearchScreen(t, host, func(s ptytest.Screen) bool { return s.Contains("READY>") })
+	readyPattern := regexp.MustCompile(`CHILD_READY:([0-9]+)`)
+	children := make(map[string]bool)
+	awaitChild := func() {
+		t.Helper()
+		waitSearchScreen(t, host, func(s ptytest.Screen) bool {
+			for _, match := range readyPattern.FindAllStringSubmatch(s.String(), -1) {
+				if !children[match[1]] {
+					children[match[1]] = true
+					return true
+				}
+			}
+			return false
+		})
+	}
+	awaitChild()
 	reply := func(marker string, cols, rows int) {
 		t.Helper()
 		host.Send(marker + "\r")
 		waitSearchScreen(t, host, func(s ptytest.Screen) bool { return s.Contains(fmtReply(marker, cols, rows)) })
 	}
 	host.Send("\x0cc")
+	awaitChild()
 	reply("new-local", 80, 24)
 	host.Resize(90, 28)
 	reply("resized-local", 90, 28)
@@ -141,6 +168,7 @@ func TestHostRestoreLocalTabsAndPopupPTY(t *testing.T) {
 	reply("returned-local", 90, 28)
 	host.Send("\x0cj")
 	waitSearchScreen(t, host, func(s ptytest.Screen) bool { return s.Contains("j hide") })
+	awaitChild()
 	reply("popup-box", 90, 13)
 	host.Resize(92, 30)
 	reply("resized-popup", 92, 14)
