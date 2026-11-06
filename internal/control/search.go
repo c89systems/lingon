@@ -26,6 +26,18 @@ type SearchView struct {
 	Text, Ghost, CandidateID string
 }
 
+// Label identifies the invoking search command or the importance editor.
+// importantOnly records the requested scope even when important mode is inactive.
+func (v SearchView) Label(importantOnly bool) string {
+	if v.Important {
+		return "i "
+	}
+	if importantOnly {
+		return "/ "
+	}
+	return "? "
+}
+
 // SearchResult describes a consumed key, a changed field, or an accepted session.
 type SearchResult struct {
 	Consumed, Changed bool

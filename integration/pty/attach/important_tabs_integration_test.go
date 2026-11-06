@@ -66,7 +66,7 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			wait(viewer, func(s ptytest.Screen) bool { return s.Contains("PROMPT>") })
 			viewer.Send("printf 'FIRST_%s\\n' READY\r\x0c?")
 			wait(viewer, func(s ptytest.Screen) bool {
-				return s.Contains("FIRST_READY") && strings.TrimSpace(s.Row(19)) == "/" && strings.Contains(s.Row(0), "important-b")
+				return s.Contains("FIRST_READY") && strings.TrimSpace(s.Row(19)) == "?" && strings.Contains(s.Row(0), "important-b")
 			})
 			active := color(viewer, "important-a")
 			inactive := color(viewer, "important-b")
@@ -88,7 +88,7 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			})
 			viewer.Send("printf 'POPUP_%s\\n' READY\r\x0c\x09\r\x0c?")
 			wait(viewer, func(s ptytest.Screen) bool {
-				return s.Contains("POPUP_READY") && strings.TrimSpace(s.Row(19)) == "/" && color(viewer, "important-b").BG == active.BG
+				return s.Contains("POPUP_READY") && strings.TrimSpace(s.Row(19)) == "?" && color(viewer, "important-b").BG == active.BG
 			})
 			if viewer.Snapshot().Cells[99].BG == fill {
 				t.Fatal("marking every tab left important mode")
@@ -103,7 +103,7 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			wait(other, func(s ptytest.Screen) bool { return s.Contains("SECOND_READY") })
 			other.Send("\x0c?")
 			wait(other, func(s ptytest.Screen) bool {
-				return strings.TrimSpace(s.Row(19)) == "/" && other.Snapshot().Cells[99].BG == fill
+				return strings.TrimSpace(s.Row(19)) == "?" && other.Snapshot().Cells[99].BG == fill
 			})
 			viewer.Send("\x1b\x0cI\x0c/\t")
 			field("/ important-a")
@@ -119,7 +119,7 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			viewer.Send("\t")
 			field("i important-b important-a")
 			viewer.Send("\r\x0c?")
-			field("/")
+			field("?")
 			if viewer.Snapshot().Cells[99].BG == fill {
 				t.Fatal("batch completion did not mark both tabs")
 			}
@@ -128,7 +128,7 @@ func TestImportantTabsLocalAndRelayCLI(t *testing.T) {
 			viewer.Send("\x17important-a important-b")
 			field("i important-a important-b")
 			viewer.Send("\r\x0c?")
-			field("/")
+			field("?")
 			if viewer.Snapshot().Cells[99].BG != fill {
 				t.Fatal("typed batch did not clear both marks")
 			}

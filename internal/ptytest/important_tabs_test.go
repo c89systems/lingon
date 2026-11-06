@@ -96,7 +96,7 @@ func TestImportantTabsHostAndAttachPTY(t *testing.T) {
 			// The local search field fences the complete frame, without advancing
 			// time or depending on more application output to reveal focus.
 			viewer.Send("\x0c?")
-			searchField(t, viewer, "/")
+			searchField(t, viewer, "?")
 			focused := importantTabColor(viewer, "alpha-2")
 			unfocused := importantTabColor(viewer, "alpha-3")
 			focusMode := terminal.ModeBold

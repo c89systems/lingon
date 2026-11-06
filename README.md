@@ -361,8 +361,9 @@ clipboard until Space or Enter commits a replacement.
 
 In the interactive host and `lingon attach`, press `Ctrl+l /` to open a search
 field at the bottom left. In important-tab mode, `/` searches only marked tabs;
-`Ctrl+l ?` always searches all tabs. Type a case-sensitive session-name prefix; the rest
-of the suggested name appears in gray. Enter accepts the suggestion and opens
+`Ctrl+l ?` always searches all tabs. The field shows `/` or `?` to match the
+invoking key. Type a case-sensitive session-name prefix; the rest of the suggested
+name appears in gray. Enter accepts the suggestion and opens
 that exact session. Tab first fills the suggestion; further Tab presses cycle
 through session names in tab order, wrapping at the end. Tab on an empty field
 starts with the tab after the current session. Shift+Tab cycles in reverse;

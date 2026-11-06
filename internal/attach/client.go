@@ -2449,7 +2449,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		}
 		items := searchSessions()
 		view := search.View(items)
-		c.renderSearch(mvu.SearchState{Visible: view.Active, Important: view.Important, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
+		c.renderSearch(mvu.SearchState{Visible: view.Active, Important: view.Important, Label: view.Label(searchImportant.Load()), Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
 	}
 	pending := make([]byte, 0, 2048)
 	var scrollState scrollInputState
