@@ -138,7 +138,12 @@ func (d *Directory) Complete(ctx context.Context, prefix string) (Result, error)
 	if err != nil {
 		return Result{Path: base}, err
 	}
-	dir, err := os.Open(path)
+	if err := ctx.Err(); err != nil {
+		return Result{Path: base}, err
+	}
+	// Reject non-directories at open time: opening an unpaired FIFO for reading
+	// would block before cancellation or ReadDir can be checked.
+	dir, err := os.OpenFile(path, os.O_RDONLY|unix.O_DIRECTORY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return Result{Path: base}, fmt.Errorf("directory completion: %w", err)
 	}

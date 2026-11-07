@@ -29,6 +29,12 @@ func TestDirectoryChangeAndOneLevelCompletion(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(result.Directories, []string{"alink/", "alpha/", "alpine/"}) {
 		t.Fatalf("%+v %v", result, err)
 	}
+	if _, err := directory.Complete(ctx, "afile/child"); err == nil {
+		t.Fatal("accepted a regular file as the completion directory")
+	}
+	if linked, err := directory.Complete(ctx, "alink/"); err != nil || !reflect.DeepEqual(linked.Directories, []string{"alink/deep/"}) {
+		t.Fatalf("symlinked directory: %+v %v", linked, err)
+	}
 	result, err = directory.Complete(ctx, "alpha/")
 	if err != nil || !reflect.DeepEqual(result.Directories, []string{"alpha/deep/"}) {
 		t.Fatalf("%+v %v", result, err)
