@@ -397,6 +397,15 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		}
 		return nil
 	}
+	resizePopup := func(parentID string) {
+		mu.Lock()
+		view := views[popups.ID(parentID)]
+		mu.Unlock()
+		if view != nil && view.client != nil {
+			cols, rows := view.client.terminalSize()
+			_ = view.client.SendResize(ctx, cols, rows)
+		}
+	}
 	const waitForSessionsGrace = 30 * time.Second
 	var waitMu sync.Mutex
 	waitCtrl := mvu.NewAttachWaitController(waitForSessionsGrace)
@@ -1532,6 +1541,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				views[nextID] = nextView
 				activeID = nextID
 				mu.Unlock()
+				resizePopup(nextID)
 				setTabs()
 				if changedActive {
 					ui.ApplyAction(mvu.TabWakeAction{Duration: 0})
@@ -1550,6 +1560,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 				return nil
 			}
 			mu.Unlock()
+			resizePopup(nextID)
 			setTabs()
 			if changedActive {
 				_ = view.client.applyGeometry(ctx)
@@ -1601,6 +1612,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 		activeID = nextID
 		mouseMode.Set(view.client != nil && view.client.ScrollbackActive())
 		mu.Unlock()
+		resizePopup(nextID)
 		setTabs()
 		if changedActive {
 			ui.ApplyAction(mvu.TabWakeAction{Duration: 0})
@@ -2194,13 +2206,7 @@ func (m *MultiClient) Run(ctx context.Context) error {
 			return
 		}
 		_ = view.client.processTerminalResize(ctx, sessionAllowsResize(session))
-		mu.Lock()
-		popupView := views[popups.ID(id)]
-		mu.Unlock()
-		if popupView != nil && popupView.client != nil {
-			cols, rows := popupView.client.terminalSize()
-			_ = popupView.client.SendResize(ctx, cols, rows)
-		}
+		resizePopup(id)
 	}
 	drainPendingResize := func() {
 		for {
