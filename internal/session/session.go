@@ -3457,6 +3457,7 @@ func (r *Runner) activateRemote(ctx context.Context, sessionID string, stdout, s
 	}
 	if r.remoteSessions.IsDisabled(sessionID) {
 		r.setActiveSession(sessionID, false)
+		r.resizePopup()
 		r.updateTabs(r.remoteSessions.Sessions())
 		r.remoteSessions.Enable(ctx, sessionID, r.remoteStdout(stdout))
 		r.remoteSessions.RenderDisabled(sessionID, r.remoteStdout(stdout))
@@ -3468,6 +3469,7 @@ func (r *Runner) activateRemote(ctx context.Context, sessionID string, stdout, s
 		return err
 	}
 	r.setActiveSession(sessionID, false)
+	r.resizePopup()
 	r.updateTabs(r.remoteSessions.Sessions())
 	r.remoteSessions.RenderClear(sessionID)
 	r.refreshTabBar(stdout)
