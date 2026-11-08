@@ -1136,6 +1136,95 @@ class EndToEndTest {
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun fn_selection_scrolls_beyond_viewport_and_survives_two_finger_history_pan() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        setResizeHostEnabled(false)
+        val id = startHostsViaHarness(count = 1, cols = 100, rows = 80, shell = "/bin/sh", initialLines = 120).single()
+        selectSessionForFixture(id, expectedCols = 100, expectedRows = 80)
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("LINE_${id} 119") }
+        focusTerminalInput()
+        composeRule.onNodeWithText("ALT").performClick()
+        composeRule.onNodeWithText("ALT").performClick()
+        assertTrue(hasTextNode("FN"))
+        composeRule.runOnIdle { appViewModel().updateZoomFactor(3f) }
+        composeRule.waitForIdle()
+        val clock = TestCoroutineScheduler()
+        val clipboard = composeRule.activity.getSystemService(ClipboardManager::class.java)
+        val previousClip = clipboard.primaryClip
+        var copied = ""
+        var visibleRows = 0
+        fun touch(view: View, action: Int, points: List<Pair<Float, Float>>, index: Int = 0) {
+            val time = SystemClock.uptimeMillis()
+            val properties = points.indices.map { pointer -> MotionEvent.PointerProperties().apply {
+                this.id = pointer; toolType = MotionEvent.TOOL_TYPE_FINGER
+            } }.toTypedArray()
+            val coordinates = points.map { (px, py) -> MotionEvent.PointerCoords().apply {
+                x = px; y = py; pressure = 1f; size = 1f
+            } }.toTypedArray()
+            val event = MotionEvent.obtain(time, time, action or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                points.size, properties, coordinates, 0, 0, 1f, 1f, 0, 0, 0, 0)
+            try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+        fun pan(dy: Float) {
+            composeRule.runOnIdle {
+                val view = findTerminalView() as TerminalGridView
+                touch(view, MotionEvent.ACTION_DOWN, listOf(100f to 100f))
+                assertEquals(copied, view.selectedText())
+                touch(view, MotionEvent.ACTION_POINTER_DOWN, listOf(100f to 100f, 200f to 100f), 1)
+                touch(view, MotionEvent.ACTION_MOVE, listOf(100f to 100f + dy, 200f to 100f + dy))
+                touch(view, MotionEvent.ACTION_POINTER_UP, listOf(100f to 100f + dy, 200f to 100f + dy), 1)
+                touch(view, MotionEvent.ACTION_UP, listOf(100f to 100f + dy))
+            }
+        }
+        try {
+            composeRule.runOnIdle {
+                val view = findTerminalView() as TerminalGridView
+                view.selectionScrollDispatcher = StandardTestDispatcher(clock)
+                view.restoreViewportState(view.captureViewportState().copy(
+                    cameraOffsetXPx = 0f, cameraOffsetYPx = 0f,
+                    mode = systems.pkt.lingon.terminal.TerminalViewportMode.Manual,
+                ))
+                visibleRows = view.getVisibleEndRowExclusive() - view.getVisibleStartRow()
+                val w = view.getScaledCellWidthForTesting()
+                val h = view.getScaledCellHeightForTesting()
+                touch(view, MotionEvent.ACTION_DOWN, listOf(w * 0.5f to h * 0.5f))
+                touch(view, MotionEvent.ACTION_MOVE, listOf(w * 4.5f to view.getViewportHeightForTesting() - 1f))
+                clock.runCurrent()
+                clock.advanceTimeBy(20 * systems.pkt.lingon.terminal.TerminalSelectionAutoScroll.IntervalMs + 1)
+                clock.runCurrent()
+                touch(view, MotionEvent.ACTION_UP, listOf(w * 4.5f to view.getViewportHeightForTesting() - 1f))
+                copied = view.selectedText() ?: throw AssertionError("selection disappeared")
+                assertTrue("selection stayed within the original viewport", copied.lines().size > visibleRows)
+                assertTrue(copied.contains("LINE_${id}"))
+            }
+            pan(20_000f)
+            waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                var preserved = false
+                composeRule.runOnIdle { preserved = (findTerminalView() as? TerminalGridView)?.selectedText() == copied }
+                stateForTest().scrollbackOffsetRows > 0 && preserved
+            }
+            val historyOffset = stateForTest().scrollbackOffsetRows
+            pan(-20_000f)
+            composeRule.runOnIdle { assertEquals(copied, (findTerminalView() as TerminalGridView).selectedText()) }
+            assertEquals("panning must keep selected history available", historyOffset, stateForTest().scrollbackOffsetRows)
+            sendKeyStroke(KeyEvent.KEYCODE_C)
+            waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                clipboard.primaryClip?.getItemAt(0)?.coerceToText(composeRule.activity)?.toString() == copied
+            }
+            assertTrue(hasTextNode("FN"))
+        } finally {
+            composeRule.runOnIdle {
+                (findTerminalView() as? TerminalGridView)?.selectionScrollDispatcher = Dispatchers.Main.immediate
+            }
+            if (previousClip != null) clipboard.setPrimaryClip(previousClip) else clipboard.clearPrimaryClip()
+        }
+    }
+
     @Test
     fun pinch_zoom_adjusts_view_and_resets() {
         setEndpoint(testConfig.endpoint)
