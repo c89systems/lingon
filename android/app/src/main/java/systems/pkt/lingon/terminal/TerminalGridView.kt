@@ -14,6 +14,7 @@ import android.view.ViewConfiguration
 import android.view.WindowInsets
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.ColorUtils
 import androidx.compose.ui.graphics.toArgb
 import systems.pkt.lingon.R
 import systems.pkt.lingon.DefaultTerminalZoom
@@ -1014,6 +1015,15 @@ class TerminalGridView @JvmOverloads constructor(
         }
 
         canvas.restore()
+
+        // Paint in screen pixels: zoom must not thicken the history/live divider.
+        // Snap inward so a fractional row boundary never paints over live cells.
+        val historyBottomPx = scrollbackOffsetRows * scaledH - effectiveOffsetY
+        if (scrollbackOffsetRows in 1 until rows && historyBottomPx >= 1f && historyBottomPx <= viewportHeightPx) {
+            val top = floor(historyBottomPx) - 1f
+            bgPaint.color = ColorUtils.blendARGB(pal.defaultBg.toArgb(), pal.defaultFg.toArgb(), 0.4f)
+            canvas.drawRect(0f, top, width.toFloat(), top + 1f, bgPaint)
+        }
     }
 
     private fun resolvePaint(mode: Int): TextPaint {

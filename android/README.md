@@ -39,6 +39,10 @@ rendering pipeline.
   Android clipboard contents into the active terminal, including after switching
   sessions.
 
+When history and live terminal rows are visible together, a dim horizontal line
+marks their boundary. It occupies the final pixel row of history, stays one
+screen pixel thick at every zoom level, and does not change terminal row height.
+
 ## Terminal links
 
 Tap an OSC 8 link label to open its transmitted HTTP or HTTPS target in Android's

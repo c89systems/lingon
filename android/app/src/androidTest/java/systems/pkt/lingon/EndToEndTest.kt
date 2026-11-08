@@ -4111,6 +4111,53 @@ class EndToEndTest {
     }
 
     @Test
+    fun scrollback_boundary_is_last_history_pixel_in_real_session() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        setResizeHostEnabled(false)
+        val id = startHostsViaHarness(count = 1, cols = 80, rows = 30, shell = "/bin/sh", initialLines = 80).single()
+        selectSessionForFixture(id, expectedCols = 80, expectedRows = 30)
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("LINE_${id} 079") }
+        composeRule.runOnIdle { appViewModel().adjustScrollback(4) }
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { stateForTest().scrollbackOffsetRows == 4 }
+        composeRule.runOnIdle {
+            val view = findTerminalView() as TerminalGridView
+            view.restoreViewportState(view.captureViewportState().copy(cameraOffsetYPx = 0f,
+                mode = systems.pkt.lingon.terminal.TerminalViewportMode.Manual))
+            val before = view.captureViewportState()
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            try {
+                view.draw(Canvas(bitmap))
+                val boundary = 4 * view.getScaledCellHeightForTesting() - view.getCameraOffsetYForTesting()
+                assertTrue("history/live boundary must be visible", boundary >= 1f && boundary < view.getViewportHeightForTesting())
+                val row = kotlin.math.floor(boundary).toInt() - 1
+                // The rightmost column is blank in both the shell and history fixture.
+                val x = view.width - 2
+                val color = bitmap.getPixel(x, row)
+                assertTrue("separator must be visible and dim", android.graphics.Color.red(color) in 50..180)
+                assertEquals(android.graphics.Color.BLACK, bitmap.getPixel(x, row - 1))
+                assertEquals(android.graphics.Color.BLACK, bitmap.getPixel(x, row + 1))
+                for (col in 0 until view.width) assertEquals("separator spans the viewport", color, bitmap.getPixel(col, row))
+                assertEquals("separator must not affect layout or camera", before, view.captureViewportState())
+            } finally { bitmap.recycle() }
+        }
+        composeRule.runOnIdle { appViewModel().adjustScrollback(Int.MIN_VALUE) }
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { stateForTest().scrollbackOffsetRows == 0 }
+        composeRule.runOnIdle {
+            val view = findTerminalView() as TerminalGridView
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            try {
+                view.draw(Canvas(bitmap))
+                for (y in 0 until view.getViewportHeightForTesting()) {
+                    assertEquals("no boundary remains in live-only view", android.graphics.Color.BLACK, bitmap.getPixel(view.width - 2, y))
+                }
+            } finally { bitmap.recycle() }
+        }
+    }
+
+    @Test
     fun keyboard_visible_zoomed_pan_across_scrollback_boundary_is_continuous() {
         setEndpoint(testConfig.endpoint)
         ensureLoggedOut()
