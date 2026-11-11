@@ -138,6 +138,10 @@ func SessionIDExists(sessions []SessionTabSource, id string) bool {
 
 // NextSessionID returns the next/previous session id using wrap-around semantics.
 func NextSessionID(sessions []SessionTabSource, active string, dir int) string {
+	return nextSessionID(sessions, active, dir, nil)
+}
+
+func nextSessionID(sessions []SessionTabSource, active string, dir int, include func(string) bool) string {
 	if len(sessions) == 0 {
 		return ""
 	}
@@ -164,9 +168,12 @@ func NextSessionID(sessions []SessionTabSource, active string, dir int) string {
 		} else {
 			idx = (idx - 1 + len(sessions)) % len(sessions)
 		}
-		if sessions[idx].ID != active {
-			break
+		if sessions[idx].ID != active && (include == nil || include(sessions[idx].ID)) {
+			return sessions[idx].ID
 		}
+	}
+	if include != nil {
+		return active
 	}
 	return sessions[idx].ID
 }

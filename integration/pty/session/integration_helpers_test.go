@@ -14,6 +14,11 @@ import (
 	"pkt.systems/lingon/internal/terminal"
 )
 
+func hasConnectedBanner(row string) bool {
+	row = strings.TrimRight(row, " ")
+	return row == "connected" || strings.HasSuffix(row, " connected")
+}
+
 func snapshotCellAt(snap terminal.Snapshot, row, col int) (terminal.Cell, bool) {
 	if row < 1 || col < 1 || row > snap.Rows || col > snap.Cols {
 		return terminal.Cell{}, false

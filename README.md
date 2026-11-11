@@ -14,6 +14,13 @@ It supports these roles and clients:
 The host/attach terminal UI paths use a full-framebuffer MVU runtime
 (`internal/mvu`) as the canonical renderer and state-transition model.
 
+Host and attach preserve single, double, curly, dotted and dashed underlines,
+including their independent colors, in live views and scrollback. This keeps
+Neovim spelling marks distinct from ordinary underlined text. The outer terminal
+must support the [styled-underline sequences](https://sw.kovidgoyal.net/kitty/underlines/).
+For remote sessions, update both the host and attach client so the host captures
+these attributes before sending them.
+
 ![Lingon](lingon.gif)
 
 ## Install
@@ -120,6 +127,13 @@ Tokens are stored at `~/.lingon/auth.json` by default.
 The file stores auth per normalized endpoint key, so switching `-e/--endpoint`
 reuses the matching cached refresh/access tokens.
 
+An established `lingon attach` keeps its live terminal connections when credential
+refresh encounters a temporary network, proxy, or server failure (such as HTTP
+502). Saved credentials remain intact; the normal refresh/reconnect schedule can
+recover without logging in again. A failed attempt to open another tab leaves
+the current tab visible and usable. An expired or rejected refresh token still
+requires authentication. Refresh POSTs are not blindly replayed on server errors.
+
 Log out from an endpoint (remote revoke + local token removal):
 
 ```bash
@@ -167,7 +181,8 @@ lingon -e https://localhost:12843/v1 -s my-session
 lingon
 ```
 
-Lingon uses prefix keystroke `Ctrl+l` as *command introducer*, see `Ctrl+l h` (`ctrl+l` followed by `h`) for help.
+Lingon uses prefix keystroke `Ctrl+l` as *command introducer*. Press `Ctrl+l h`
+(`ctrl+l` followed by `h`), or `Ctrl+l Ctrl+h`, for help.
 
 ![ctrl-l h help](lingon-ctrl-l-h.gif)
 
@@ -256,9 +271,10 @@ Interactive host options (selection):
 - `--cols`, `--rows` terminal size (`0` means auto-detect for interactive host; built-in default for headless)
 - `--scrollback-lines` scrollback lines
 - `--term` TERM value for the PTY
-- `-r, --respawn` respawn the shell on exit
+- `-R, --respawn` respawn the shell on exit
+- `-r, --restore` restore the terminal window to each selected session's size
 - `-o, --offline` start offline; toggle relay publishing with `Ctrl+l o`
-- `--hostname-only` show hostname-only connect/disconnect banners
+- `--hostname-only` show hostname-only reconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)
 - `--disable-desktop-notifications` disable best-effort local desktop notifications for inactivity walls
 - `-k, --insecure` skip TLS verification
@@ -321,19 +337,40 @@ Output keeps filling the buffer while the rows you are viewing stay in place.
 Navigation moves that anchor; `End` or `G` jumps to the newest content without
 leaving scrollback mode. Later output accumulates below that position. If the
 history limit removes the anchored text, the view clamps to the oldest retained
-rows. Press `q` or Escape to return to the live screen.
+rows. Press `q` or `Q` to return to the live screen.
+
+For line copying, press lowercase `v`. The cursor starts at the middle-left;
+vertical navigation moves it and scrolls the viewport only at its edges.
+Space starts a full-line selection in inverted colors. Space or Enter copies the
+inclusive selection and clears its inversion, leaving the visual cursor active.
+`v` cancels an unfinished selection and returns to ordinary scrollback; `q`
+returns to the live screen. Uppercase `V` is reserved; horizontal movement is
+disabled while the visual cursor is active. Enter without an active selection
+does nothing; use Space to start one.
+
+Press `Ctrl+l ]` to paste into the focused terminal, including a popup. The text
+clipboard is shared across tabs in this one interactive Lingon process, held
+only in memory, and independent of the OS/image clipboard and other Lingon
+processes. Copy includes entire physical source rows, even when wider than the
+viewport, removes right-edge padding, and ends each row with a newline. Paste
+honors the destination application's bracketed-paste mode; otherwise row endings
+are sent as Enter. Starting or cancelling a new selection preserves the previous
+clipboard until Space or Enter commits a replacement.
 
 #### Find a session
 
 In the interactive host and `lingon attach`, press `Ctrl+l /` to open a search
-field at the bottom left. Type a case-sensitive session-name prefix; the rest
-of the suggested name appears in gray. Enter accepts the suggestion and opens
+field at the bottom left. In important-tab mode, `/` searches only marked tabs;
+`Ctrl+l ?` always searches all tabs. The field shows `/` or `?` to match the
+invoking key. Type a case-sensitive session-name prefix; the rest of the suggested
+name appears in gray. Enter accepts the suggestion and opens
 that exact session. Tab first fills the suggestion; further Tab presses cycle
 through session names in tab order, wrapping at the end. Tab on an empty field
-starts with the first tab. Shift+Tab cycles in reverse, wrapping from the first
-tab to the last; on an empty field it starts with the last tab. Like Tab, it
-first fills an incomplete suggestion. An exact typed name takes precedence
-over longer prefix matches. Duplicate names remain separate selectable sessions.
+starts with the tab after the current session. Shift+Tab cycles in reverse;
+on an empty field it starts with the tab before the current session. Both wrap
+around the tab list. Like Tab, Shift+Tab first fills an incomplete suggestion.
+An exact typed name takes precedence over longer prefix matches. Duplicate names
+remain separate selectable sessions.
 
 Search keeps the current session active until Enter. Escape or Ctrl+C cancels;
 Backspace edits the prefix. Enter with no matching session leaves the field
@@ -346,6 +383,63 @@ Search temporarily shows the bar even when it is hidden. Cancellation restores
 the active tab and prior bar visibility. Outside search, the bar scrolls
 automatically to keep the active tab visible when switching tabs or resizing
 the window.
+
+#### Hyperlinks
+
+The desktop host and `lingon attach` preserve [OSC 8 hyperlinks](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)
+through snapshots, updates, tab switches, overlays and scrollback. Link labels
+keep the application's styling; ordinary underlines do not become hyperlinks.
+Use your outer terminal emulator's usual hyperlink gesture to open a target.
+The publishing host or `lingonx` and attach must both run a build with this support;
+an older host has already discarded the targets before attach receives the screen.
+The Android app also preserves these targets in live output and scrollback; tap
+a label to open its HTTP or HTTPS target using Android's link handler.
+
+#### Mark important tabs
+
+In the interactive host or `lingon attach`, `Ctrl+l i` opens the `i` prompt.
+An unmarked current tab is prefilled with a trailing space; Enter marks it.
+If the current tab is already important, the prompt starts empty so adding other
+tabs preserves its mark. Empty Enter closes the prompt without changes. To remove
+an existing mark, explicitly include that tab's name in the list.
+`Ctrl+l Ctrl+i` is an alias (the second key is also Tab). To toggle several
+tabs together, type a name prefix to see its gray completion. Tab fills that
+completion without adding a space; further Tab presses cycle through all tabs
+within the same entry. Shift+Tab cycles backwards. On each empty entry, Tab
+starts after the active tab, or before it with Shift+Tab, wrapping at either end.
+Typing a prefix instead starts completion from that prefix. Space accepts
+the current suggestion and starts the next entry. Enter applies the entire list,
+including a completed final entry without a trailing space. Ctrl+W deletes
+one whole space-separated name, including dots, hyphens and underscores. Escape
+or Ctrl+C cancels without changing marks. Enter toggles each selected tab once
+without switching tabs. Missing or ambiguous unresolved names keep the prompt
+open and apply nothing; entries accepted with Tab or Space retain their session
+identity even when names are duplicated.
+
+The first mark enters important-tab mode: the bar and unmarked tabs use a darker
+variant of the selected theme, while marked tabs keep their normal colors. The active
+non-important tab has a brighter background and readable text, with bold text
+to make focus clear. Inactive non-important tabs stay dark. Marking an
+already important tab removes its mark; removing the last mark leaves the mode.
+`Ctrl+l I` clears every mark and restores the normal bar.
+
+While important mode is active, `Ctrl+l n` and `Ctrl+l p` cycle only marked tabs
+(also `Ctrl+l Ctrl+n` / `Ctrl+l Ctrl+p`). From an unmarked tab they select the
+next or previous marked tab in the full tab order. A single remaining important
+tab stays selected; if no marked tabs are present, cycling keeps the current
+session. Resetting the mode restores ordinary cycling through all tabs.
+
+`Ctrl+l /` limits search to important tabs while this mode is active. Tab and
+Shift+Tab cycle through marked tabs relative to the current tab, including when
+the current tab is unmarked. `Ctrl+l ?` always searches all tabs. Outside
+important-tab mode, both commands search all tabs.
+
+Marks belong to this UI process and session identities: they survive tab switches,
+renames, theme changes and reconnects, without affecting another host/attach UI.
+Marking from a popup marks its parent tab. A new session reusing a marked name
+does not inherit the mark. Closing marked tabs does not reset the mode; use
+`Ctrl+l I` to reset it. Marks are not saved across process restarts. Android and
+the Web UI do not expose this mode.
 
 #### Restore the remote terminal size
 
@@ -372,6 +466,15 @@ keep their own dimensions. Acknowledging Lingon's window request does not resize
 the remote session. Turning restoration off resumes the usual resize policy:
 remote headless sessions follow the local viewport; interactive hosts retain
 their own size.
+
+`lingon -r` / `lingon --restore` enables the same behavior in the interactive
+host's tab UI. Switching to an attached remote session restores its dimensions;
+returning to a local host tab restores that tab's initial or manually resized
+size. Manual resizing changes only the selected session. `Ctrl+l !` toggles
+restoration in both host and attach. It is off by default and has no window to
+resize in detached headless startup. Host shell respawn uses `-R/--respawn`;
+`Ctrl+l r` remains the respawn toggle.
+
 When combined with `--restore`, geometry, `--cols` and `--rows` initialize the
 initially selected remote session first. Lingon waits for its resized grid, then
 restores the local window to that size and continues as an ordinary restore
@@ -393,6 +496,28 @@ unsupported or restricted window to resize.
 | [Tmux](https://github.com/tmux/tmux/blob/master/input.c) | Consumes the ordinary resize sequence; use a direct terminal for window restoration. Split panes also constrain the available grid. |
 | Other terminals / window managers | Support varies. A reported `TERM=xterm-256color` alone does not establish window-resize support. Tiling, fullscreen and screen-size constraints may prevent an exact fit. |
 
+#### Change a session's launch directory
+
+`Ctrl+l f` opens **working directory:** at the lower left, prefilled with the
+focused session's full launch path. It edits the directory on that session's
+owning machine, including through `lingon attach` and `attach -x`. Enter saves;
+Escape or Ctrl+C cancels. Ctrl+U clears the field; Ctrl+W deletes the last path
+component. Paths can contain spaces and may be absolute, relative to the current
+launch directory, or start with `~/` for the owner's home directory.
+
+Type a directory prefix to see a gray completion. Tab completes it and cycles
+through matching directories at that level; Shift+Tab cycles backwards. Type
+more after the completed trailing slash to descend another level. Files are
+excluded, symlinks to directories are included, and completion never scans a
+subtree. Missing or inaccessible paths leave the prompt open with an error.
+
+This is a per-session runtime setting: it survives client reconnects, affects
+future `Ctrl+l c` sessions, new `Ctrl+l j` popups, and application respawns.
+The currently running application keeps its own cwd. Existing child sessions
+keep their own setting, and hiding/showing a popup does not restart it. The
+setting does not change the attach process's cwd and is not saved after the
+owning Lingon process exits. Share clients cannot inspect or change directories.
+
 #### Create and rename sessions
 
 - In `lingon attach` (including `attach -x`), `Ctrl+l c` starts and selects a
@@ -406,13 +531,15 @@ unsupported or restricted window to resize.
 Remote management requires the session's owner account and a connected host;
 it does not require the terminal control lease. Share sessions cannot create or
 rename terminals. Local `attach -x` management works while publishing is offline.
-New detached terminals inherit the host process's startup directory and terminal
-configuration, and survive the creating client or host exiting. Lingon does not
+New detached terminals inherit their source session's current launch directory
+and terminal configuration, and survive the creating client or host exiting. Lingon does not
 track the running shell's current directory.
 
 Names are display metadata: renaming preserves the session ID, socket filename,
 connections, and share tokens. Use the original ID for CLI session arguments.
-Names support 1–80 Unicode characters without control characters. Headless names
+Names support 1–80 Unicode characters without control characters. Spaces are
+automatically replaced with underscores when starting or renaming sessions,
+including names loaded from local or relay state. Headless names
 persist locally and are advertised again on relay reconnect. Interactive names
 last for that host process's lifetime. If a request's response is lost, refresh
 the session list before trying again; clients do not automatically repeat
@@ -433,7 +560,7 @@ Attach options (selection):
 - `-g, --geometry COLSxROWS` resize the local terminal and remote session; applied before `--restore`
 - `--cols`, `--rows` size individual dimensions (`0` uses local size); applied before `--restore`
 - `--pick` interactively pick a session
-- `--hostname-only` show hostname-only connect/disconnect banners
+- `--hostname-only` show hostname-only reconnect banners
 - `--theme` TUI chrome theme (`lingon themes`)
 - `--disable-desktop-notifications` disable best-effort local desktop notifications for inactivity walls
 - `-k, --insecure` skip TLS verification

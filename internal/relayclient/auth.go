@@ -16,6 +16,10 @@ import (
 	"pkt.systems/lingon/internal/tlsmgr"
 )
 
+// ErrCredentialsRejected marks a definitive rejection or expiry of refresh credentials.
+// Network errors, rate limits, and server/proxy failures never carry this marker.
+var ErrCredentialsRejected = errors.New("credentials rejected")
+
 const accessRefreshSkew = time.Minute
 
 type refreshRequest struct {
@@ -57,7 +61,7 @@ func EnsureAccessTokenWithTLSDirInsecure(ctx context.Context, endpoint, authPath
 			return nil
 		}
 		if !state.RefreshValidAt(now) {
-			return errors.New("refresh token expired")
+			return fmt.Errorf("%w: refresh token expired", ErrCredentialsRejected)
 		}
 		refreshed, err := RefreshTokenWithTLSDirInsecure(ctx, normalized, state.RefreshToken, tlsDir, insecure)
 		if err != nil {
@@ -113,6 +117,9 @@ func RefreshTokenWithTLSDirInsecure(ctx context.Context, httpURL, refreshToken, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return authstore.State{}, fmt.Errorf("%w: refresh failed: %s", ErrCredentialsRejected, resp.Status)
+		}
 		return authstore.State{}, fmt.Errorf("refresh failed: %s", resp.Status)
 	}
 	var out refreshResponse

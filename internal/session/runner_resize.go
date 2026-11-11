@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -25,6 +26,10 @@ func (r *Runner) setTerminalGeometry(cols, rows int) {
 
 func (r *Runner) initializeTerminalGeometry() {
 	cols, rows := r.terminalGeometry()
+	actualCols, actualRows := termSizeAny(r.stdout(), r.stdin())
+	r.geometryMu.Lock()
+	r.windowObserved = terminal.WindowSize{Cols: actualCols, Rows: actualRows}
+	r.geometryMu.Unlock()
 	explicit := cols > 0 || rows > 0
 	if cols <= 0 || rows <= 0 {
 		detectedCols, detectedRows := termSizeAny(r.stdout(), r.stdin())
@@ -69,24 +74,48 @@ func (r *Runner) windowRequest(id string) *terminal.WindowSizeRequest {
 	return r.windowSizes[id]
 }
 
+// pendingWindowSize gives explicit host sizing precedence over restore. Restore
+// targets come from the session, so disabling restore leaves no forced geometry
+// behind on hidden local tabs.
+func (r *Runner) pendingWindowSize(id string) terminal.WindowSize {
+	if request := r.windowRequest(id); request != nil {
+		if size := request.Pending(); size.Cols > 0 && size.Rows > 0 {
+			return size
+		}
+	}
+	if r.restoreEnabled() {
+		if local := r.localSession(id); local != nil {
+			cols, rows := local.Size()
+			return terminal.WindowSize{Cols: cols, Rows: rows}
+		}
+	}
+	return terminal.WindowSize{}
+}
+
 func (r *Runner) requestPendingWindow(ctx context.Context, id string) {
 	request := r.windowRequest(id)
-	if request == nil {
-		return
-	}
-	size := request.Pending()
+	size := r.pendingWindowSize(id)
 	if size.Cols <= 0 || size.Rows <= 0 {
 		return
 	}
 	cols, rows := termSizeAny(r.stdout(), r.stdin())
-	request.Observe(terminal.WindowSize{Cols: cols, Rows: rows})
-	if cols == size.Cols && rows == size.Rows {
+	if request != nil {
+		request.Observe(terminal.WindowSize{Cols: cols, Rows: rows})
+	}
+	pending := terminal.WindowSize{}
+	if r.windowRestore != nil {
+		pending = r.windowRestore.Latest()
+	}
+	if cols == size.Cols && rows == size.Rows && (pending == (terminal.WindowSize{}) || pending == size) {
 		return
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	r.stdoutMu.Lock()
+	if r.windowRestore != nil {
+		r.windowRestore.Requested(size)
+	}
 	err := writeAll(ctx, r.stdout(), terminal.WindowResizeSequence(size), r.clock)
 	r.stdoutMu.Unlock()
 	if err != nil || r.effects == nil {
@@ -94,7 +123,7 @@ func (r *Runner) requestPendingWindow(ctx context.Context, id string) {
 	}
 	r.effects.Schedule(ctx, "window-size", time.Second, func() {
 		active, _ := r.activeSession()
-		if active != id || request.Pending() != size {
+		if active != id || r.pendingWindowSize(id) != size {
 			return
 		}
 		cols, rows := termSizeAny(r.stdout(), r.stdin())
@@ -111,6 +140,7 @@ func (r *Runner) ResizeActive(cols, rows int) {
 		return
 	}
 	r.setTerminalGeometry(cols, rows)
+	r.resizePopup()
 	activeID, activeLocal := r.activeSession()
 	if activeLocal {
 		targetID := strings.TrimSpace(activeID)
@@ -136,6 +166,38 @@ func (r *Runner) ResizeActiveIfChanged(cols, rows int) bool {
 		return false
 	}
 	activeID, activeLocal := r.activeSession()
+	actual := terminal.WindowSize{Cols: cols, Rows: rows}
+	r.geometryMu.Lock()
+	previous := r.windowObserved
+	r.windowObserved = actual
+	r.geometryMu.Unlock()
+	if !activeLocal && r.remoteSessions != nil && (r.restoreEnabled() || (r.windowRestore != nil && r.windowRestore.Latest() != (terminal.WindowSize{}))) {
+		if actual != previous {
+			r.setTerminalGeometry(cols, rows)
+			r.resizePopup()
+			_ = r.remoteSessions.processTerminalResize(r.runCtx, activeID)
+			return true
+		}
+		return false
+	}
+	// Input reads also check dimensions. An unchanged window cannot acknowledge
+	// a new request: a previous tab's older resize may still arrive afterwards.
+	if actual != previous && r.windowRestore != nil && r.windowRestore.Acknowledge(actual) {
+		if request := r.windowRequest(activeID); request != nil {
+			request.Observe(actual)
+		}
+		// The parent retains its logical size; the popup follows the now-acknowledged physical viewport.
+		r.resizePopup()
+		return false
+	}
+	if r.restoreEnabled() {
+		if actual == previous {
+			return false
+		}
+		if request := r.windowRequest(activeID); request != nil {
+			request.Set(terminal.WindowSize{})
+		}
+	}
 	if activeLocal {
 		if request := r.windowRequest(activeID); request != nil {
 			size := request.Observe(terminal.WindowSize{Cols: cols, Rows: rows})
@@ -162,4 +224,34 @@ func (r *Runner) ResizeActiveIfChanged(cols, rows int) bool {
 	}
 	r.ResizeActive(cols, rows)
 	return true
+}
+
+func (r *Runner) restoreEnabled() bool { return r.windowRestore != nil && r.windowRestore.Load() }
+
+func (r *Runner) toggleRestore(ctx context.Context, stdout *os.File) {
+	id, local := r.activeSession()
+	enabled := false
+	if !local && r.remoteSessions != nil {
+		enabled = r.remoteSessions.toggleRestore(id)
+	} else {
+		enabled = !r.restoreEnabled()
+		r.windowRestore.Store(enabled)
+		if enabled {
+			if session := r.localSession(id); session != nil {
+				cols, rows := session.Size()
+				r.setTerminalGeometry(cols, rows)
+				r.requestPendingWindow(ctx, id)
+			}
+		}
+	}
+	if enabled {
+		r.showStatus("Restore: follow session size", stdout, 2*time.Second)
+	} else {
+		r.showStatus("Restore off", stdout, 2*time.Second)
+		cols, rows := termSizeAny(stdout, r.stdin())
+		r.ResizeActive(cols, rows)
+	}
+	if !local && r.remoteSessions != nil {
+		r.remoteSessions.Render(id)
+	}
 }

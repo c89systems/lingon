@@ -79,6 +79,10 @@ message Snapshot {
   uint32 mode = 9;
   string title = 10;
   repeated string graphemes = 11;
+  // Same color encoding as fg/bg; absent or zero follows the foreground.
+  repeated uint32 underline_color = 12 [packed = true];
+  // Per-cell OSC 8 params;URI payloads. Empty entries are not hyperlinks.
+  repeated string hyperlinks = 13;
 }
 
 message DiffRow {
@@ -88,6 +92,8 @@ message DiffRow {
   repeated uint32 fg = 4 [packed = true];
   repeated uint32 bg = 5 [packed = true];
   repeated string graphemes = 6;
+  repeated uint32 underline_color = 7 [packed = true];
+  repeated string hyperlinks = 8;
 }
 
 message Diff {
@@ -106,6 +112,8 @@ message ScrollbackRow {
   repeated uint32 fg = 3 [packed = true];
   repeated uint32 bg = 4 [packed = true];
   repeated string graphemes = 5;
+  repeated uint32 underline_color = 6 [packed = true];
+  repeated string hyperlinks = 7;
 }
 
 message Scrollback {
@@ -204,4 +212,8 @@ message SessionManagement {
   string result_session_id = 5;
   string error = 6;
   bool completed = 7;
+  uint32 cols = 8;
+  uint32 rows = 9;
+  string path = 10;
+  repeated string directories = 11;
 }

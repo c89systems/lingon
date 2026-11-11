@@ -13,12 +13,14 @@ type Action int
 const (
 	// ActionNone indicates no control action.
 	ActionNone Action = iota
-	// ActionQuit quits the local session/attach.
+	// ActionQuit force-closes the focused session.
 	ActionQuit
 	// ActionSendCtrlD sends an explicit Ctrl-D to the remote session.
 	ActionSendCtrlD
 	// ActionNewPTY creates a new local PTY session.
 	ActionNewPTY
+	// ActionDirectory edits the focused session launch directory.
+	ActionDirectory
 	// ActionRename edits the active session display name.
 	ActionRename
 	// ActionToggleRespawn toggles respawn for the active local session.
@@ -45,6 +47,22 @@ const (
 	ActionSearch
 	// ActionToggleRestore toggles attachment terminal size restoration.
 	ActionToggleRestore
+	// ActionDetach leaves attach without terminating sessions.
+	ActionDetach
+	// ActionPopup toggles the current tab's popup terminal.
+	ActionPopup
+	// ActionClosePopup terminates the current tab's popup terminal.
+	ActionClosePopup
+	// ActionSSHDisconnect sends Enter followed by the SSH disconnect escape.
+	ActionSSHDisconnect
+	// ActionPasteText pastes the process-local scrollback text clipboard.
+	ActionPasteText
+	// ActionToggleImportant opens the batch importance prompt for the current parent tab.
+	ActionToggleImportant
+	// ActionResetImportant leaves important-tab mode and clears all marks.
+	ActionResetImportant
+	// ActionSearchImportant searches important tabs, or all tabs outside that mode.
+	ActionSearchImportant
 )
 
 // Prefix tracks ctrl+l command state.
@@ -66,11 +84,21 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 		switch b {
 		case 'Q':
 			return ActionQuit, nil
+		case 'q':
+			return ActionDetach, nil
+		case 'j', 0x0a: // Ctrl+J
+			return ActionPopup, nil
+		case 'J':
+			return ActionClosePopup, nil
+		case 'C':
+			return ActionSSHDisconnect, nil
 		case 'd', 'D':
 			return ActionSendCtrlD, nil
 		case 'l', 'L':
 			return ActionNone, []byte{CtrlL}
-		case 'c', 'C':
+		case 'f':
+			return ActionDirectory, nil
+		case 'c':
 			return ActionNewPTY, nil
 		case 'e', 'E':
 			return ActionRename, nil
@@ -83,20 +111,28 @@ func (p *Prefix) Feed(b byte) (Action, []byte) {
 			return ActionToggleWallInactivity, nil
 		case 'o', 'O':
 			return ActionToggleOffline, nil
-		case 'h', 'H':
+		case 'h', 'H', 0x08: // Ctrl+H
 			return ActionHelp, nil
-		case 'n', 'N':
+		case 'n', 'N', 0x0e: // Ctrl+N
 			return ActionNextTab, nil
-		case 'p', 'P':
+		case 'p', 'P', 0x10: // Ctrl+P
 			return ActionPrevTab, nil
 		case 'b', 'B':
 			return ActionToggleTabBar, nil
-		case 't', 'T':
+		case 't', 'T', 0x14: // Ctrl+T
 			return ActionNextTheme, nil
 		case '[':
 			return ActionScrollback, nil
+		case ']':
+			return ActionPasteText, nil
 		case '/':
+			return ActionSearchImportant, nil
+		case '?':
 			return ActionSearch, nil
+		case 'i', 0x09: // Ctrl+I (Tab)
+			return ActionToggleImportant, nil
+		case 'I':
+			return ActionResetImportant, nil
 		case '!':
 			return ActionToggleRestore, nil
 		case '0', 0:

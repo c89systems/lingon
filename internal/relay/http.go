@@ -23,6 +23,7 @@ import (
 	"pkt.systems/lingon/internal/logging"
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/server"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/sharetoken"
 	"pkt.systems/lingon/internal/theme"
 	"pkt.systems/lingon/internal/webui"
@@ -1017,7 +1018,7 @@ func (s *HTTPServer) handleWSHost(w http.ResponseWriter, r *http.Request) {
 	ws.sessionID = frame.SessionId
 	cols := int(frame.GetHello().Cols)
 	rows := int(frame.GetHello().Rows)
-	sessionName := strings.TrimSpace(frame.GetHello().ClientId)
+	sessionName := sessionmanage.NormalizeName(strings.TrimSpace(frame.GetHello().ClientId))
 	sessionHeadless := frame.GetHello().GetHeadless()
 	reconnected := false
 	var (

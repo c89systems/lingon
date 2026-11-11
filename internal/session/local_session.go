@@ -20,6 +20,7 @@ import (
 	"pkt.systems/lingon/internal/pty"
 	"pkt.systems/lingon/internal/publisher"
 	"pkt.systems/lingon/internal/render"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/terminal/emu"
 	"pkt.systems/lingon/internal/trace"
@@ -31,6 +32,7 @@ type localSession struct {
 	nameMu sync.RWMutex
 	name   string
 
+	directory         *sessionmanage.Directory
 	shell             string
 	term              string
 	clipboardMu       sync.Mutex
@@ -72,10 +74,6 @@ type localSession struct {
 	holderMu sync.Mutex
 	holderID string
 
-	veofMu   sync.Mutex
-	veofOrig uint8
-	veofSet  bool
-
 	lastActiveMu sync.RWMutex
 	lastActive   time.Time
 
@@ -91,13 +89,14 @@ type localSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	onOutput    func(id string, data []byte, snap *protocolpb.Snapshot)
-	onPTYRead   func([]byte)
-	onSnapshot  func(terminal.Snapshot)
-	onExit      func(id string, err error)
-	csiState    csiParser
-	oscState    oscStreamParser
-	cursorQuery func(terminal.Snapshot) (row, col int, ok bool)
+	onOutput     func(id string, data []byte, snap *protocolpb.Snapshot)
+	onPTYRead    func([]byte)
+	onSnapshot   func(terminal.Snapshot)
+	onScrollback func([]terminal.ScrollbackRow, int)
+	onExit       func(id string, err error)
+	csiState     csiParser
+	oscState     oscStreamParser
+	cursorQuery  func(terminal.Snapshot) (row, col int, ok bool)
 
 	oscDefaultsMu    sync.RWMutex
 	oscDefaultFg     string
@@ -432,6 +431,7 @@ func analyzeRecentInput(data []byte) recentInputSignals {
 }
 
 type localSessionOptions struct {
+	WorkingDirectory  string
 	ID                string
 	Name              string
 	Shell             string
@@ -446,6 +446,7 @@ type localSessionOptions struct {
 	OnOutput          func(id string, data []byte, snap *protocolpb.Snapshot)
 	OnPTYRead         func([]byte)
 	OnSnapshot        func(terminal.Snapshot)
+	OnScrollback      func([]terminal.ScrollbackRow, int)
 	OnExit            func(id string, err error)
 	CursorQuery       func(terminal.Snapshot) (row, col int, ok bool)
 	Trace             *trace.Writer
@@ -467,7 +468,8 @@ func newLocalSession(parent context.Context, opts localSessionOptions) *localSes
 	}
 	session := &localSession{
 		id:                opts.ID,
-		name:              opts.Name,
+		directory:         sessionmanage.NewDirectory(opts.WorkingDirectory),
+		name:              sessionmanage.NormalizeName(opts.Name),
 		shell:             opts.Shell,
 		term:              opts.Term,
 		cols:              opts.Cols,
@@ -482,6 +484,7 @@ func newLocalSession(parent context.Context, opts localSessionOptions) *localSes
 		onOutput:          opts.OnOutput,
 		onPTYRead:         opts.OnPTYRead,
 		onSnapshot:        opts.OnSnapshot,
+		onScrollback:      opts.OnScrollback,
 		onExit:            opts.OnExit,
 		cursorQuery:       opts.CursorQuery,
 		trace:             opts.Trace,
@@ -654,6 +657,12 @@ func snapshotToScrollbackRows(snap *protocolpb.Snapshot) []terminal.ScrollbackRo
 			}
 			if idx < len(snap.Bg) {
 				cell.BG = snap.Bg[idx]
+			}
+			if idx < len(snap.Hyperlinks) {
+				cell.Hyperlink = snap.Hyperlinks[idx]
+			}
+			if idx < len(snap.UnderlineColor) {
+				cell.UnderlineColor = snap.UnderlineColor[idx]
 			}
 			if idx < len(snap.Graphemes) {
 				cell.Grapheme = snap.Graphemes[idx]
@@ -1014,36 +1023,10 @@ func (s *localSession) writePTYWithMode(ctx context.Context, data []byte, disabl
 }
 
 func (s *localSession) sendRemoteEOF() error {
-	if err := s.writeMu.Lock(s.ctx); err != nil {
-		return err
-	}
-	defer s.writeMu.Unlock()
-
-	s.ptyMu.RLock()
-	ptyFile := s.pty
-	termiosFile := s.tty
-	if termiosFile == nil {
-		termiosFile = ptyFile
-	}
-	s.ptyMu.RUnlock()
-	if ptyFile == nil {
-		return errPTYNotReady
-	}
-
-	veof := byte(0x04)
-	s.veofMu.Lock()
-	if s.veofSet && s.veofOrig != 0 {
-		veof = s.veofOrig
-	}
-	s.veofMu.Unlock()
-	if termiosFile != nil {
-		_ = setVEOF(termiosFile, veof)
-		defer func() {
-			s.applyVEOF(s.holder())
-		}()
-	}
-
-	_, err := pty.NewWriter(ptyFile, s.clock).Write(s.ctx, []byte{veof})
+	// The application owns termios. PTY input may be processed after Write
+	// returns, so temporarily changing VEOF around a write cannot deliver EOF
+	// reliably. Explicit input bypasses filterRemoteInput instead.
+	_, err := s.writePTY([]byte{0x04})
 	return err
 }
 
@@ -1090,58 +1073,13 @@ func (s *localSession) filterRemoteInput(data []byte) []byte {
 func (s *localSession) setHolder(holderID string) {
 	s.holderMu.Lock()
 	defer s.holderMu.Unlock()
-	// Repeated host input must not rewrite termios while the shell is
-	// switching modes. Apply EOF policy only on an ownership transition.
+	// Only ownership transitions revoke queued clipboard operations. Terminal
+	// settings belong to the application, independent of the input holder.
 	if s.holderID == holderID {
 		return
 	}
 	s.holderID = holderID
 	s.clipboardHandler.Reset()
-	s.applyVEOF(holderID)
-}
-
-func (s *localSession) captureVEOF() {
-	s.ptyMu.RLock()
-	termiosFile := s.tty
-	if termiosFile == nil {
-		termiosFile = s.pty
-	}
-	s.ptyMu.RUnlock()
-	if termiosFile == nil {
-		return
-	}
-	val, err := getVEOF(termiosFile)
-	if err != nil {
-		return
-	}
-	s.veofMu.Lock()
-	s.veofOrig = val
-	s.veofSet = true
-	s.veofMu.Unlock()
-}
-
-func (s *localSession) applyVEOF(holderID string) {
-	s.ptyMu.RLock()
-	termiosFile := s.tty
-	if termiosFile == nil {
-		termiosFile = s.pty
-	}
-	s.ptyMu.RUnlock()
-	if termiosFile == nil {
-		return
-	}
-	s.veofMu.Lock()
-	if !s.veofSet {
-		s.veofMu.Unlock()
-		return
-	}
-	orig := s.veofOrig
-	s.veofMu.Unlock()
-	target := orig
-	if holderID != "" && holderID != publisher.HostControlID {
-		target = 0
-	}
-	_ = setVEOF(termiosFile, target)
 }
 
 func (s *localSession) enqueueRemoteInput(data []byte) error {
@@ -1242,7 +1180,22 @@ func (s *localSession) runOnce(ctx context.Context) error {
 		s.clipboardMu.Unlock()
 		_ = endpoint.Close()
 	}()
-	ptyFile, ttyFile, cmd, err := startShell(s.shell, s.term, endpoint)
+	cols, rows := s.Size()
+	if cols <= 0 {
+		cols = 80
+	}
+	if rows <= 0 {
+		rows = 24
+	}
+	directory, err := s.directory.Path()
+	if err != nil {
+		s.reportStartup(err)
+		return err
+	}
+	ptyFile, ttyFile, cmd, err := startShell(shellStart{
+		shell: s.shell, term: s.term, clipboard: endpoint, directory: directory,
+		size: terminal.WindowSize{Cols: cols, Rows: rows},
+	})
 	if err != nil {
 		s.reportStartup(err)
 		return err
@@ -1253,7 +1206,6 @@ func (s *localSession) runOnce(ctx context.Context) error {
 	s.cmd = cmd
 	s.ptyMu.Unlock()
 
-	s.captureVEOF()
 	if ttyFile != nil {
 		_ = ttyFile.Close()
 		s.ptyMu.Lock()
@@ -1340,7 +1292,7 @@ func (s *localSession) runOnce(ctx context.Context) error {
 		}
 		emuImpl.SetScrollbackLimit(s.scrollbackLines)
 	}
-	cols, rows := s.cols, s.rows
+	cols, rows = s.cols, s.rows
 	_ = s.resizePTY(cols, rows)
 	rawSnap, snapErr := s.emulator.Snapshot()
 	if snapErr == nil {
@@ -1510,7 +1462,11 @@ func snapshotCellKey(snap *protocolpb.Snapshot, idx int) string {
 	if idx < len(snap.GetGraphemes()) {
 		grapheme = snap.GetGraphemes()[idx]
 	}
-	return fmt.Sprintf("%d/%d/%d/%d/%s", runeVal, modeVal, fgVal, bgVal, grapheme)
+	var link string
+	if idx < len(snap.Hyperlinks) {
+		link = snap.Hyperlinks[idx]
+	}
+	return fmt.Sprintf("%d/%d/%d/%d/%s/%q", runeVal, modeVal, fgVal, bgVal, grapheme, link)
 }
 
 func mergePreservedSnapshotAt(prev, current *protocolpb.Snapshot, originCol, originRow, overlayCols, overlayRows int) *protocolpb.Snapshot {
@@ -1597,16 +1553,18 @@ func cloneSnapshot(snap *protocolpb.Snapshot) *protocolpb.Snapshot {
 		return nil
 	}
 	out := &protocolpb.Snapshot{
-		Cols:          snap.GetCols(),
-		Rows:          snap.GetRows(),
-		Runes:         append([]uint32(nil), snap.GetRunes()...),
-		Modes:         append([]int32(nil), snap.GetModes()...),
-		Fg:            append([]uint32(nil), snap.GetFg()...),
-		Bg:            append([]uint32(nil), snap.GetBg()...),
-		CursorVisible: snap.GetCursorVisible(),
-		Mode:          snap.GetMode(),
-		Title:         snap.GetTitle(),
-		Graphemes:     append([]string(nil), snap.GetGraphemes()...),
+		Cols:           snap.GetCols(),
+		Rows:           snap.GetRows(),
+		Runes:          append([]uint32(nil), snap.GetRunes()...),
+		Modes:          append([]int32(nil), snap.GetModes()...),
+		Fg:             append([]uint32(nil), snap.GetFg()...),
+		UnderlineColor: append([]uint32(nil), snap.GetUnderlineColor()...),
+		Hyperlinks:     append([]string(nil), snap.GetHyperlinks()...),
+		Bg:             append([]uint32(nil), snap.GetBg()...),
+		CursorVisible:  snap.GetCursorVisible(),
+		Mode:           snap.GetMode(),
+		Title:          snap.GetTitle(),
+		Graphemes:      append([]string(nil), snap.GetGraphemes()...),
 	}
 	if snap.Cursor != nil {
 		out.Cursor = &protocolpb.Cursor{X: snap.Cursor.GetX(), Y: snap.Cursor.GetY()}
@@ -1726,12 +1684,13 @@ func blankSnapshot(cols, rows int) *protocolpb.Snapshot {
 	}
 	size := cols * rows
 	return &protocolpb.Snapshot{
-		Cols:  uint32(cols),
-		Rows:  uint32(rows),
-		Runes: make([]uint32, size),
-		Modes: make([]int32, size),
-		Fg:    make([]uint32, size),
-		Bg:    make([]uint32, size),
+		Cols:           uint32(cols),
+		Rows:           uint32(rows),
+		Runes:          make([]uint32, size),
+		Modes:          make([]int32, size),
+		Fg:             make([]uint32, size),
+		UnderlineColor: make([]uint32, size),
+		Bg:             make([]uint32, size),
 	}
 }
 
@@ -1764,6 +1723,12 @@ func copySnapshotRegionFromOffset(dst, src *protocolpb.Snapshot, originCol, orig
 	if rows <= 0 || cols <= 0 {
 		return
 	}
+	if (len(src.Hyperlinks) > 0 || len(dst.Hyperlinks) > 0) && len(dst.Hyperlinks) == 0 {
+		dst.Hyperlinks = make([]string, dstCols*dstRows)
+	}
+	if len(dst.UnderlineColor) == 0 {
+		dst.UnderlineColor = make([]uint32, dstCols*dstRows)
+	}
 	if len(src.GetGraphemes()) > 0 && len(dst.Graphemes) == 0 {
 		dst.Graphemes = make([]string, dstCols*dstRows)
 	}
@@ -1784,6 +1749,17 @@ func copySnapshotRegionFromOffset(dst, src *protocolpb.Snapshot, originCol, orig
 			}
 			if srcIdx < len(src.Bg) {
 				dst.Bg[dstIdx] = src.Bg[srcIdx]
+			}
+			if len(dst.Hyperlinks) > 0 {
+				dst.Hyperlinks[dstIdx] = ""
+				if srcIdx < len(src.Hyperlinks) {
+					dst.Hyperlinks[dstIdx] = src.Hyperlinks[srcIdx]
+				}
+			}
+			if srcIdx < len(src.UnderlineColor) {
+				dst.UnderlineColor[dstIdx] = src.UnderlineColor[srcIdx]
+			} else {
+				dst.UnderlineColor[dstIdx] = terminal.ColorDefault
 			}
 			if len(dst.Graphemes) > 0 {
 				if srcIdx < len(src.Graphemes) {
@@ -1821,6 +1797,12 @@ func copySnapshotRegionAtOffset(dst, src *protocolpb.Snapshot, originCol, origin
 	if rows <= 0 || cols <= 0 {
 		return
 	}
+	if (len(src.Hyperlinks) > 0 || len(dst.Hyperlinks) > 0) && len(dst.Hyperlinks) == 0 {
+		dst.Hyperlinks = make([]string, dstCols*dstRows)
+	}
+	if len(dst.UnderlineColor) == 0 {
+		dst.UnderlineColor = make([]uint32, dstCols*dstRows)
+	}
 	if len(src.GetGraphemes()) > 0 && len(dst.Graphemes) == 0 {
 		dst.Graphemes = make([]string, dstCols*dstRows)
 	}
@@ -1841,6 +1823,17 @@ func copySnapshotRegionAtOffset(dst, src *protocolpb.Snapshot, originCol, origin
 			}
 			if srcIdx < len(src.Bg) {
 				dst.Bg[dstIdx] = src.Bg[srcIdx]
+			}
+			if len(dst.Hyperlinks) > 0 {
+				dst.Hyperlinks[dstIdx] = ""
+				if srcIdx < len(src.Hyperlinks) {
+					dst.Hyperlinks[dstIdx] = src.Hyperlinks[srcIdx]
+				}
+			}
+			if srcIdx < len(src.UnderlineColor) {
+				dst.UnderlineColor[dstIdx] = src.UnderlineColor[srcIdx]
+			} else {
+				dst.UnderlineColor[dstIdx] = terminal.ColorDefault
 			}
 			if len(dst.Graphemes) > 0 {
 				if srcIdx < len(src.Graphemes) {
@@ -2449,9 +2442,6 @@ func (s *localSession) processPTYOutput(data []byte) error {
 	if suppressResizeRedraw {
 		return nil
 	}
-	if s.onSnapshot != nil {
-		s.onSnapshot(rawSnap)
-	}
 	protoSnap := protocol.SnapshotToProto(rawSnap)
 	snap := protoSnap
 	resetViewport := !s.allowRemoteResize && localOutputForcesFullRedraw(filtered)
@@ -2472,14 +2462,23 @@ func (s *localSession) processPTYOutput(data []byte) error {
 	}
 	scrollRows = s.appendScrollback(s.drainScrollbackRows(scrollRows))
 	s.commitScrollbackFrame(snap)
+	// Deliver committed history before its live snapshot on either transport.
+	// A relay-disabled headless session still has local viewers needing history.
+	if len(scrollRows) > 0 {
+		if s.publisher != nil {
+			s.publisher.PublishScrollback(scrollRows, int(snap.Cols), false)
+		} else if s.onScrollback != nil {
+			s.onScrollback(scrollRows, int(snap.Cols))
+		}
+	}
+	if s.onSnapshot != nil {
+		s.onSnapshot(rawSnap)
+	}
 	if s.onOutput != nil {
 		s.onOutput(s.id, filtered, snap)
 	}
 	s.notifyOutput()
 	if s.publisher != nil {
-		if len(scrollRows) > 0 {
-			s.publisher.PublishScrollback(scrollRows, int(snap.Cols), false)
-		}
 		s.publisher.Publish(filtered, snap)
 	}
 	return nil

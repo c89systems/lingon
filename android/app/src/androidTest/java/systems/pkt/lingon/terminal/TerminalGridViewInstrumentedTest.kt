@@ -252,6 +252,53 @@ class TerminalGridViewInstrumentedTest {
         }
     }
 
+    @Test
+    fun osc8LabelTapTracksTargetOnlyDiffAndRemoval() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            var opened: String? = null
+            var focused = false
+            val label = "日\u0000本\u0000 label"
+            var snapshot = TerminalSnapshot.fromProto(systems.pkt.lingon.protocol.Snapshot.newBuilder()
+                .setCols(label.length).setRows(1).addAllRunes(label.map { it.code })
+                .addAllHyperlinks(List(label.length) { "id=x;https://first.test" }).build())
+            val view = TerminalGridView(instrumentation.targetContext).apply {
+                setOnOpenLink { opened = it; true }
+                setOnTap { focused = true }
+                measure(exactlyMeasureSpec(720), exactlyMeasureSpec(240))
+                layout(0, 0, 720, 240)
+            }
+            fun update(seq: Long) {
+                view.update(snapshot = snapshot, fontSizeSp = 14, minFontSizeSp = 8,
+                    palette = TerminalPalette(defaultFg = Color.White, defaultBg = Color.Black),
+                    frameSeq = seq, hostCols = label.length, hostRows = 1, fitToViewWidth = false,
+                    zoomFactor = DefaultTerminalZoom, panResetNonce = 0, scrollbackOffsetRows = 0,
+                    imeVisible = false, isLoading = false)
+            }
+            fun tap() = dispatchSinglePointerTap(view, view.getScaledCellWidthForTesting() * 3.5f,
+                view.getScaledCellHeightForTesting() * 0.5f)
+            update(1)
+            tap()
+            assertEquals("https://first.test", opened)
+            assertFalse(focused)
+            snapshot = TerminalSnapshot.applyDiff(snapshot, systems.pkt.lingon.protocol.Diff.newBuilder()
+                .setCols(label.length).setRows(1).addDiffRows(systems.pkt.lingon.protocol.DiffRow.newBuilder()
+                    .setRow(0).addAllRunes(label.map { it.code })
+                    .addAllHyperlinks(List(label.length) { "id=x;https://second.test" })).build())
+            update(2)
+            tap()
+            assertEquals("https://second.test", opened)
+            snapshot = TerminalSnapshot.applyDiff(snapshot, systems.pkt.lingon.protocol.Diff.newBuilder()
+                .setCols(label.length).setRows(1).addDiffRows(systems.pkt.lingon.protocol.DiffRow.newBuilder()
+                    .setRow(0).addAllRunes(label.map { it.code })).build())
+            update(3)
+            opened = null
+            tap()
+            assertEquals(null, opened)
+            assertTrue("unlinked label must regain normal tap behavior", focused)
+        }
+    }
+
     private fun exactlyMeasureSpec(size: Int): Int {
         return View.MeasureSpec.makeMeasureSpec(size, View.MeasureSpec.EXACTLY)
     }

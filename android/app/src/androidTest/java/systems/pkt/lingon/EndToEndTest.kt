@@ -433,7 +433,7 @@ class EndToEndTest {
         composeRule.onNodeWithTag(TestTags.RenameSessionInput).performTextReplacement("Android build 🦊")
         composeRule.onNodeWithTag(TestTags.RenameSessionSave).performClick()
         waitUntilNoError(10_000) {
-            appViewModel().state.value.sessions.any { it.id == created && it.name == "Android build 🦊" }
+            appViewModel().state.value.sessions.any { it.id == created && it.name == "Android_build_🦊" }
         }
         assertEquals(created, appViewModel().state.value.activeSessionId)
         assertTerminalResponsive(sessionId = original)
@@ -1132,6 +1132,95 @@ class EndToEndTest {
                 clipboard.primaryClip?.getItemAt(0)?.coerceToText(composeRule.activity)?.toString() == "ECHO"
             }
         } finally {
+            if (previousClip != null) clipboard.setPrimaryClip(previousClip) else clipboard.clearPrimaryClip()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun fn_selection_scrolls_beyond_viewport_and_survives_two_finger_history_pan() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        setResizeHostEnabled(false)
+        val id = startHostsViaHarness(count = 1, cols = 100, rows = 80, shell = "/bin/sh", initialLines = 120).single()
+        selectSessionForFixture(id, expectedCols = 100, expectedRows = 80)
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("LINE_${id} 119") }
+        focusTerminalInput()
+        composeRule.onNodeWithText("ALT").performClick()
+        composeRule.onNodeWithText("ALT").performClick()
+        assertTrue(hasTextNode("FN"))
+        composeRule.runOnIdle { appViewModel().updateZoomFactor(3f) }
+        composeRule.waitForIdle()
+        val clock = TestCoroutineScheduler()
+        val clipboard = composeRule.activity.getSystemService(ClipboardManager::class.java)
+        val previousClip = clipboard.primaryClip
+        var copied = ""
+        var visibleRows = 0
+        fun touch(view: View, action: Int, points: List<Pair<Float, Float>>, index: Int = 0) {
+            val time = SystemClock.uptimeMillis()
+            val properties = points.indices.map { pointer -> MotionEvent.PointerProperties().apply {
+                this.id = pointer; toolType = MotionEvent.TOOL_TYPE_FINGER
+            } }.toTypedArray()
+            val coordinates = points.map { (px, py) -> MotionEvent.PointerCoords().apply {
+                x = px; y = py; pressure = 1f; size = 1f
+            } }.toTypedArray()
+            val event = MotionEvent.obtain(time, time, action or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                points.size, properties, coordinates, 0, 0, 1f, 1f, 0, 0, 0, 0)
+            try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+        fun pan(dy: Float) {
+            composeRule.runOnIdle {
+                val view = findTerminalView() as TerminalGridView
+                touch(view, MotionEvent.ACTION_DOWN, listOf(100f to 100f))
+                assertEquals(copied, view.selectedText())
+                touch(view, MotionEvent.ACTION_POINTER_DOWN, listOf(100f to 100f, 200f to 100f), 1)
+                touch(view, MotionEvent.ACTION_MOVE, listOf(100f to 100f + dy, 200f to 100f + dy))
+                touch(view, MotionEvent.ACTION_POINTER_UP, listOf(100f to 100f + dy, 200f to 100f + dy), 1)
+                touch(view, MotionEvent.ACTION_UP, listOf(100f to 100f + dy))
+            }
+        }
+        try {
+            composeRule.runOnIdle {
+                val view = findTerminalView() as TerminalGridView
+                view.selectionScrollDispatcher = StandardTestDispatcher(clock)
+                view.restoreViewportState(view.captureViewportState().copy(
+                    cameraOffsetXPx = 0f, cameraOffsetYPx = 0f,
+                    mode = systems.pkt.lingon.terminal.TerminalViewportMode.Manual,
+                ))
+                visibleRows = view.getVisibleEndRowExclusive() - view.getVisibleStartRow()
+                val w = view.getScaledCellWidthForTesting()
+                val h = view.getScaledCellHeightForTesting()
+                touch(view, MotionEvent.ACTION_DOWN, listOf(w * 0.5f to h * 0.5f))
+                touch(view, MotionEvent.ACTION_MOVE, listOf(w * 4.5f to view.getViewportHeightForTesting() - 1f))
+                clock.runCurrent()
+                clock.advanceTimeBy(20 * systems.pkt.lingon.terminal.TerminalSelectionAutoScroll.IntervalMs + 1)
+                clock.runCurrent()
+                touch(view, MotionEvent.ACTION_UP, listOf(w * 4.5f to view.getViewportHeightForTesting() - 1f))
+                copied = view.selectedText() ?: throw AssertionError("selection disappeared")
+                assertTrue("selection stayed within the original viewport", copied.lines().size > visibleRows)
+                assertTrue(copied.contains("LINE_${id}"))
+            }
+            pan(20_000f)
+            waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                var preserved = false
+                composeRule.runOnIdle { preserved = (findTerminalView() as? TerminalGridView)?.selectedText() == copied }
+                stateForTest().scrollbackOffsetRows > 0 && preserved
+            }
+            val historyOffset = stateForTest().scrollbackOffsetRows
+            pan(-20_000f)
+            composeRule.runOnIdle { assertEquals(copied, (findTerminalView() as TerminalGridView).selectedText()) }
+            assertEquals("panning must keep selected history available", historyOffset, stateForTest().scrollbackOffsetRows)
+            sendKeyStroke(KeyEvent.KEYCODE_C)
+            waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                clipboard.primaryClip?.getItemAt(0)?.coerceToText(composeRule.activity)?.toString() == copied
+            }
+            assertTrue(hasTextNode("FN"))
+        } finally {
+            composeRule.runOnIdle {
+                (findTerminalView() as? TerminalGridView)?.selectionScrollDispatcher = Dispatchers.Main.immediate
+            }
             if (previousClip != null) clipboard.setPrimaryClip(previousClip) else clipboard.clearPrimaryClip()
         }
     }
@@ -4022,6 +4111,56 @@ class EndToEndTest {
     }
 
     @Test
+    fun scrollback_boundary_is_last_history_pixel_in_real_session() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        setResizeHostEnabled(false)
+        val id = startHostsViaHarness(count = 1, cols = 80, rows = 30, shell = "/bin/sh", initialLines = 80).single()
+        selectSessionForFixture(id, expectedCols = 80, expectedRows = 30)
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("LINE_${id} 079") }
+        composeRule.runOnIdle { appViewModel().adjustScrollback(4) }
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { stateForTest().scrollbackOffsetRows == 4 }
+        composeRule.runOnIdle {
+            val view = findTerminalView() as TerminalGridView
+            view.restoreViewportState(view.captureViewportState().copy(cameraOffsetYPx = 0f,
+                mode = systems.pkt.lingon.terminal.TerminalViewportMode.Manual))
+            val before = view.captureViewportState()
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            try {
+                view.draw(Canvas(bitmap))
+                val boundary = 4 * view.getScaledCellHeightForTesting() - view.getCameraOffsetYForTesting()
+                assertTrue("history/live boundary must be visible", boundary >= 1f && boundary < view.getViewportHeightForTesting())
+                val row = kotlin.math.floor(boundary).toInt() - 1
+                // The final complete dash/gap pair lies in blank fixture columns.
+                val x = ((view.width - 12) / 12) * 12
+                val color = bitmap.getPixel(x, row)
+                assertTrue("separator must be brighter but still subdued", android.graphics.Color.red(color) in 130..210)
+                assertEquals(android.graphics.Color.BLACK, bitmap.getPixel(x, row - 1))
+                assertEquals(android.graphics.Color.BLACK, bitmap.getPixel(x, row + 1))
+                for (col in 0 until view.width) {
+                    if (col % 12 < 8) assertEquals("dashes span the viewport", color, bitmap.getPixel(col, row))
+                }
+                for (col in x + 8 until x + 12) assertEquals("dash gaps remain unpainted", android.graphics.Color.BLACK, bitmap.getPixel(col, row))
+                assertEquals("separator must not affect layout or camera", before, view.captureViewportState())
+            } finally { bitmap.recycle() }
+        }
+        composeRule.runOnIdle { appViewModel().adjustScrollback(Int.MIN_VALUE) }
+        waitUntilNoError(SHORT_UI_TIMEOUT_MS) { stateForTest().scrollbackOffsetRows == 0 }
+        composeRule.runOnIdle {
+            val view = findTerminalView() as TerminalGridView
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            try {
+                view.draw(Canvas(bitmap))
+                for (y in 0 until view.getViewportHeightForTesting()) {
+                    assertEquals("no boundary remains in live-only view", android.graphics.Color.BLACK, bitmap.getPixel(view.width - 2, y))
+                }
+            } finally { bitmap.recycle() }
+        }
+    }
+
+    @Test
     fun keyboard_visible_zoomed_pan_across_scrollback_boundary_is_continuous() {
         setEndpoint(testConfig.endpoint)
         ensureLoggedOut()
@@ -4156,6 +4295,106 @@ class EndToEndTest {
         waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
             val info = readTerminalDebugInfo()
             info != null && info.state == "Connected" && info.activeSessionId == target
+        }
+    }
+
+    @Test
+    fun osc8_labels_open_host_and_headless_targets_through_relay() {
+        setEndpoint(testConfig.endpoint)
+        ensureLoggedOut()
+        loginWithConfiguredUser()
+        waitForTerminalReady(timeoutMs = TERMINAL_READY_TIMEOUT_MS)
+        setResizeHostEnabled(false)
+        val survivor = activeSessionId()
+        val host = startHostsViaHarness(count = 1, cols = 60, rows = 12, shell = "/bin/sh").single()
+        val headless = startHeadlessViaHarness(cols = 60, rows = 12)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val opened = java.util.concurrent.LinkedBlockingQueue<android.content.Intent>()
+        // Exercise the production link opener but intercept browser launches so the
+        // test remains self-contained and does not depend on network/browser state.
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action != android.content.Intent.ACTION_VIEW) return null
+                opened.add(intent)
+                return android.app.Instrumentation.ActivityResult(0, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        var tapTime = SystemClock.uptimeMillis()
+        fun emit(payload: String) {
+            composeRule.runOnIdle {
+                appViewModel().sendRawInput("printf '\\033[2J\\033[H\\033]8;$payload\\033\\\\Chalmers Ventures\\033]8;;\\033\\\\\\nPLAIN_UNDERLINE\\n'\n")
+            }
+        }
+        fun awaitTarget(target: String) {
+            waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                stateForTest().activeSnapshot?.let { snapshot ->
+                    snapshot.hyperlinks?.any { it.substringAfter(';', "") == target } == true &&
+                        systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(snapshot).any { it.url == target }
+                } == true
+            }
+        }
+        fun tapTarget(target: String) {
+            composeRule.runOnIdle {
+                val view = findTerminalView() as? TerminalGridView ?: throw AssertionError("missing terminal grid")
+                val snap = stateForTest().activeSnapshot ?: throw AssertionError("missing terminal snapshot")
+                val link = systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(snap).first { it.url == target }
+                view.restoreViewportState(view.captureViewportState().copy(
+                    cameraOffsetXPx = 0f,
+                    cameraOffsetYPx = link.startRow * view.getScaledCellHeightForTesting(),
+                    mode = systems.pkt.lingon.terminal.TerminalViewportMode.Manual,
+                ))
+                assertEquals(target, view.getLinkAtCellForTesting(link.startRow, link.startCol))
+                val x = (link.startCol + 0.5f) * view.getScaledCellWidthForTesting() - view.getCameraOffsetXForTesting()
+                val y = (link.startRow + 0.5f) * view.getScaledCellHeightForTesting() - view.getCameraOffsetYForTesting()
+                assertTrue("link outside terminal viewport", x >= 0 && x < view.width && y >= 0 && y < view.getViewportHeightForTesting())
+                // Explicit event times keep independent taps outside Android's
+                // double-tap interval without wall-clock sleeps.
+                tapTime = maxOf(SystemClock.uptimeMillis(), tapTime + android.view.ViewConfiguration.getDoubleTapTimeout() + 100L)
+                val time = tapTime
+                for ((action, offset) in listOf(MotionEvent.ACTION_DOWN to 0L, MotionEvent.ACTION_UP to 16L)) {
+                    val event = MotionEvent.obtain(time, time + offset, action, x, y, 0)
+                    try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+                }
+            }
+            val intent = opened.poll() ?: throw AssertionError("label tap did not launch ACTION_VIEW")
+            assertEquals(target, intent.dataString)
+            assertTrue(intent.categories.orEmpty().contains(android.content.Intent.CATEGORY_BROWSABLE))
+            assertTrue("label tap opened multiple activities", opened.isEmpty())
+        }
+        try {
+            for (id in listOf(host, headless)) {
+                selectSessionForFixture(id, expectedCols = 60, expectedRows = 12)
+                val first = "https://example.test/$id/first?q=1;two"
+                val second = "https://example.test/$id/second"
+                emit("id=label;$first")
+                awaitTarget(first)
+                tapTarget(first)
+                emit("id=label;$second")
+                awaitTarget(second)
+                assertFalse(systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(stateForTest().activeSnapshot!!).any { it.url == first })
+                tapTarget(second)
+                // Switching away closes this view; reopening must recover links from
+                // a fresh host snapshot rather than relying on the previous diff.
+                selectSessionForFixture(survivor)
+                selectSessionForFixture(id, expectedCols = 60, expectedRows = 12)
+                awaitTarget(second)
+                tapTarget(second)
+                composeRule.runOnIdle { appViewModel().sendRawInput("seq 1 40; echo OSC8_HISTORY_READY\n") }
+                waitUntilNoError(SHORT_UI_TIMEOUT_MS) { snapshotContainsToken("OSC8_HISTORY_READY") && !snapshotContainsToken("Chalmers Ventures") }
+                composeRule.runOnIdle { appViewModel().adjustScrollback(Int.MAX_VALUE) }
+                awaitTarget(second)
+                assertTrue(stateForTest().scrollbackOffsetRows > 0)
+                tapTarget(second)
+                composeRule.runOnIdle { appViewModel().adjustScrollback(Int.MIN_VALUE) }
+                emit("")
+                waitUntilNoError(SHORT_UI_TIMEOUT_MS) {
+                    snapshotContainsToken("Chalmers Ventures") &&
+                        systems.pkt.lingon.terminal.TerminalLinks.findHttpsLinks(stateForTest().activeSnapshot!!).none { it.url == second }
+                }
+            }
+        } finally {
+            instrumentation.removeMonitor(monitor)
         }
     }
 
@@ -6075,7 +6314,7 @@ class EndToEndTest {
         composeRule.runOnUiThread {
             input.requestFocus()
             composeRule.activity.getSystemService(InputMethodManager::class.java)
-                .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                .showSoftInput(input, 0)
         }
     }
 

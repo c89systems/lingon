@@ -36,6 +36,15 @@ func DiffSnapshots(prev, next *protocolpb.Snapshot) (*protocolpb.Diff, bool) {
 			Fg:    nextRow(next.Fg, y, cols),
 			Bg:    nextRow(next.Bg, y, cols),
 		}
+		for _, color := range next.UnderlineColor[min(y*cols, len(next.UnderlineColor)):min((y+1)*cols, len(next.UnderlineColor))] {
+			if color != 0 {
+				row.UnderlineColor = nextRow(next.UnderlineColor, y, cols)
+				break
+			}
+		}
+		if len(prev.Hyperlinks) > 0 || len(next.Hyperlinks) > 0 {
+			row.Hyperlinks = nextRowStrings(next.Hyperlinks, y, cols)
+		}
 		if includeGraphemes {
 			row.Graphemes = nextRowStrings(next.Graphemes, y, cols)
 		}
@@ -57,6 +66,9 @@ func DiffSnapshots(prev, next *protocolpb.Snapshot) (*protocolpb.Diff, bool) {
 func rowChanged(prev, next *protocolpb.Snapshot, row, cols int) bool {
 	for x := 0; x < cols; x++ {
 		idx := row*cols + x
+		if hyperlinkAt(prev, idx) != hyperlinkAt(next, idx) {
+			return true
+		}
 		prevG := graphemeAt(prev, idx)
 		nextG := graphemeAt(next, idx)
 		if prevG != "" || nextG != "" {
@@ -82,6 +94,9 @@ func rowChanged(prev, next *protocolpb.Snapshot, row, cols int) bool {
 				return true
 			}
 		} else if len(prev.Fg) != len(next.Fg) {
+			return true
+		}
+		if colorAt(prev.UnderlineColor, idx) != colorAt(next.UnderlineColor, idx) {
 			return true
 		}
 		if idx < len(prev.Bg) && idx < len(next.Bg) {
@@ -149,4 +164,18 @@ func cursorEqual(a, b *protocolpb.Cursor) bool {
 		return false
 	}
 	return a.X == b.X && a.Y == b.Y
+}
+
+func colorAt(colors []uint32, idx int) uint32 {
+	if idx < len(colors) {
+		return colors[idx]
+	}
+	return 0
+}
+
+func hyperlinkAt(snap *protocolpb.Snapshot, idx int) string {
+	if idx >= 0 && idx < len(snap.Hyperlinks) {
+		return snap.Hyperlinks[idx]
+	}
+	return ""
 }

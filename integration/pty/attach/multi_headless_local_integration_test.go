@@ -1316,8 +1316,11 @@ func TestMultiAttachHeadlessCtrlLLClearsAndTabBarRecovers(t *testing.T) {
 		if screen.Contains("CLEAR_SENTINEL") {
 			return fmt.Errorf("expected sentinel to be cleared from viewport, still present")
 		}
-		if !strings.Contains(screen.Row(0), sessionID) {
-			return fmt.Errorf("expected tab bar visible after ctrl+l l clear, row=%q", screen.Row(0))
+		if !strings.Contains(screen.Row(0), "PROMPT>") || attachSess.Cursor().Row != 1 {
+			return fmt.Errorf("expected unobscured row-1 prompt after clear, row=%q cursor=%v", screen.Row(0), attachSess.Cursor())
+		}
+		if strings.Contains(screen.Row(0), sessionID) {
+			return fmt.Errorf("tab bar covers the row-1 prompt after clear: %q", screen.Row(0))
 		}
 		return nil
 	})
@@ -1736,10 +1739,19 @@ func startHeadlessDaemon(t *testing.T, spec headlessDaemonSpec) func() {
 	t.Helper()
 	shellPath := strings.TrimSpace(spec.Shell)
 	if shellPath == "" {
+		// Own the shell environment rather than reading the operator's startup
+		// files. Start below row 1 so unrelated control tests can observe tabs;
+		// explicit top-row tests use headlessInteractiveShell instead.
+		shellPath = filepath.Join(testutil.TempDir(t), "default-headless-shell")
+		shell := "/bin/sh"
+		args := ""
 		if _, err := os.Stat("/bin/bash"); err == nil {
-			shellPath = "/bin/bash"
-		} else {
-			shellPath = "/bin/sh"
+			shell = "/bin/bash"
+			args = " --noprofile --norc"
+		}
+		script := "#!/bin/sh\nexport PS1='PROMPT> '\nprintf '\\r\\n'\nexec " + shell + args + "\n"
+		if err := os.WriteFile(shellPath, []byte(script), 0700); err != nil {
+			t.Fatal(err)
 		}
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())

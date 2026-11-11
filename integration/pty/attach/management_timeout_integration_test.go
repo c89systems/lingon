@@ -65,7 +65,7 @@ func TestAttachManagementRefreshTimeoutAllowsNextRename(t *testing.T) {
 			return err
 		}
 		for _, row := range rows {
-			if row.ID == "management-timeout" && row.Name == "Recovered rename" {
+			if row.ID == "management-timeout" && row.Name == "Recovered_rename" {
 				return nil
 			}
 		}

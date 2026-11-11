@@ -17,12 +17,14 @@ import (
 	"pkt.systems/lingon/internal/clipboard"
 	"pkt.systems/lingon/internal/clock"
 	"pkt.systems/lingon/internal/config"
+	"pkt.systems/lingon/internal/control"
 	"pkt.systems/lingon/internal/desktopnotify"
 	"pkt.systems/lingon/internal/logging"
 	"pkt.systems/lingon/internal/mvu"
 	"pkt.systems/lingon/internal/netgate"
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/retryafter"
+	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/theme"
 	"pkt.systems/lingon/internal/tlsmgr"
 	"pkt.systems/pslog"
@@ -70,6 +72,9 @@ type remoteView struct {
 }
 
 type remoteOptions struct {
+	WindowRestore               *terminal.WindowRestore
+	TextClipboard               *control.TextClipboard
+	Popup                       func(string) *mvu.Popup
 	DisableDesktopNotifications bool
 	DesktopNotifier             desktopnotify.Notifier
 	Endpoint                    string
@@ -94,6 +99,9 @@ type remoteOptions struct {
 }
 
 type remoteManager struct {
+	windowRestore               *terminal.WindowRestore
+	textClipboard               *control.TextClipboard
+	popup                       func(string) *mvu.Popup
 	endpoint                    string
 	endpointLabel               string
 	token                       string
@@ -158,7 +166,18 @@ func newRemoteManager(opts remoteOptions) *remoteManager {
 		Endpoint: opts.Endpoint,
 		Theme:    theme.TUI(themeName),
 	}})
+	windowRestore := opts.WindowRestore
+	if windowRestore == nil {
+		windowRestore = terminal.NewWindowRestore(false)
+	}
+	textClipboard := opts.TextClipboard
+	if textClipboard == nil {
+		textClipboard = &control.TextClipboard{}
+	}
 	return &remoteManager{
+		textClipboard:               textClipboard,
+		windowRestore:               windowRestore,
+		popup:                       opts.Popup,
 		endpoint:                    opts.Endpoint,
 		endpointLabel:               config.EndpointDisplay(opts.Endpoint, opts.HostnameOnly),
 		token:                       opts.Token,
@@ -765,6 +784,8 @@ func (m *remoteManager) connectView(ctx context.Context, view *remoteView, stdou
 			tokenRefresher = m.refreshTokenErr
 		}
 		client = &attach.Client{
+			TextClipboard:               m.textClipboard,
+			WindowRestore:               m.windowRestore,
 			Endpoint:                    m.endpoint,
 			SessionID:                   session.ID,
 			AccessToken:                 token,
@@ -773,11 +794,15 @@ func (m *remoteManager) connectView(ctx context.Context, view *remoteView, stdou
 			DisableDesktopNotifications: m.disableDesktopNotifications,
 			DesktopNotifier:             m.desktopNotifier,
 			TLSDir:                      m.tlsDir,
+			Insecure:                    m.insecure,
 			TermSize:                    m.termSize,
 			Theme:                       themeName,
 			Logger:                      m.logger,
 			TokenRefresher:              tokenRefresher,
 			Clock:                       m.clock,
+		}
+		if m.popup != nil {
+			client.Popup = func() *mvu.Popup { return m.popup(session.ID) }
 		}
 		if seedFrom != nil {
 			client.SeedFrom(seedFrom)
@@ -951,6 +976,22 @@ func (m *remoteManager) SetScrollbackActive(sessionID string, active bool) {
 		client.RenderCurrent()
 	}
 	m.logViewState("scrollback_active", view, nil)
+}
+
+func (m *remoteManager) ScrollbackCopy(sessionID string, key byte) {
+	_, client := m.viewClient(sessionID)
+	if client != nil {
+		client.ScrollbackCopy(key)
+		client.RenderCurrent()
+	}
+}
+
+func (m *remoteManager) PasteText(ctx context.Context, sessionID, text string, stdout io.Writer) error {
+	_, client := m.viewClient(sessionID)
+	if client == nil || !client.HasSnapshot() {
+		return fmt.Errorf("session is not ready for text paste")
+	}
+	return m.SendInput(ctx, sessionID, terminal.TextPaste(text, client.Snapshot().GetMode()), stdout)
 }
 
 func (m *remoteManager) ScrollbackPage(sessionID string, delta int, viewRows int) {
@@ -1710,4 +1751,21 @@ func clientTLSConfig(tlsDir string, insecure bool) (*tls.Config, error) {
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: insecure,
 	}, nil
+}
+
+func (m *remoteManager) processTerminalResize(ctx context.Context, id string) error {
+	_, c := m.viewClient(id)
+	if c == nil {
+		return nil
+	}
+	return c.ProcessTerminalResize(ctx, m.sessionAllowsResize(id))
+}
+func (m *remoteManager) toggleRestore(id string) bool {
+	_, c := m.viewClient(id)
+	if c != nil {
+		return c.ToggleRestore()
+	}
+	enabled := !m.windowRestore.Load()
+	m.windowRestore.Store(enabled)
+	return enabled
 }

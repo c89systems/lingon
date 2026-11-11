@@ -418,24 +418,33 @@ func DrawTabBasePadAtRow(w *bytes.Buffer, cols, row, padTotalLen, messageLen int
 	w.WriteString(ui.Reset)
 }
 
-// DrawTabBar draws a top tab bar with an outrun-inspired palette.
-func DrawTabBar(w *bytes.Buffer, cols int, tabs []Tab, active int, ui theme.TUITheme) {
+// TabBarInput supplies the tab model and theme for one top-row projection.
+type TabBarInput struct {
+	Cols      int
+	Tabs      []Tab
+	Active    int
+	Theme     theme.TUITheme
+	Important ImportantTabs
+}
+
+// DrawTabBar draws the selected tab theme, dimming unmarked tabs in important mode.
+func DrawTabBar(w *bytes.Buffer, in TabBarInput) {
+	cols, tabs, active, ui := in.Cols, in.Tabs, in.Active, in.Theme
 	if cols <= 0 || len(tabs) == 0 {
 		return
 	}
-	baseBg := ui.TabBg
-	activeBg := ui.TabActiveBg
-	baseFg := ui.TabFg
-	mutedFg := ui.TabMutedFg
-	mutedActiveFg := ui.TabMutedActiveFg
-	activeFg := ui.TabActiveFg
+	normal := theme.TUITabColors{Bg: ui.TabBg, Fg: ui.TabFg, ActiveBg: ui.TabActiveBg, ActiveFg: ui.TabActiveFg, MutedFg: ui.TabMutedFg, MutedActiveFg: ui.TabMutedActiveFg}
+	base := normal
+	if in.Important.Active() {
+		base = ui.DimmedTabs
+	}
 	off := ui.Reset
 
 	w.WriteString("\x1b[1;1H")
 	w.WriteString(ui.Reset)
 	w.WriteString("\x1b[2K")
-	w.WriteString(baseBg)
-	w.WriteString(baseFg)
+	w.WriteString(base.Bg)
+	w.WriteString(base.Fg)
 	w.WriteString(strings.Repeat(" ", cols))
 	w.WriteString(off)
 
@@ -443,6 +452,11 @@ func DrawTabBar(w *bytes.Buffer, cols int, tabs []Tab, active int, ui theme.TUIT
 	start := tabViewportStart(tabs, active, cols)
 	for i := start; i < len(tabs); i++ {
 		tab := tabs[i]
+		colors := normal
+		unimportant := in.Important.Active() && !in.Important.Contains(tab.ID)
+		if unimportant {
+			colors = ui.DimmedTabs
+		}
 		remain := cols - col + 1
 		if remain <= 0 {
 			break
@@ -451,8 +465,12 @@ func DrawTabBar(w *bytes.Buffer, cols int, tabs []Tab, active int, ui theme.TUIT
 		w.WriteString("\x1b[1;")
 		w.WriteString(itoa(col))
 		w.WriteString("H")
-		dim := tab.Disabled || tab.Muted
+		focusedUnimportant := unimportant && i == active
+		dim := (tab.Disabled || tab.Muted) && !focusedUnimportant
 		italic := tab.Disabled || tab.Muted
+		if focusedUnimportant {
+			w.WriteString("\x1b[1m")
+		}
 		if dim {
 			w.WriteString("\x1b[2m")
 		}
@@ -460,20 +478,20 @@ func DrawTabBar(w *bytes.Buffer, cols int, tabs []Tab, active int, ui theme.TUIT
 			w.WriteString("\x1b[3m")
 		}
 		if i == active {
-			w.WriteString(activeBg)
+			w.WriteString(colors.ActiveBg)
 		} else {
-			w.WriteString(baseBg)
+			w.WriteString(colors.Bg)
 		}
 		if tab.Disabled || tab.Muted {
 			if i == active {
-				w.WriteString(mutedActiveFg)
+				w.WriteString(colors.MutedActiveFg)
 			} else {
-				w.WriteString(mutedFg)
+				w.WriteString(colors.MutedFg)
 			}
 		} else if i == active {
-			w.WriteString(activeFg)
+			w.WriteString(colors.ActiveFg)
 		} else {
-			w.WriteString(baseFg)
+			w.WriteString(colors.Fg)
 		}
 		w.WriteString(seg)
 		w.WriteString(off)

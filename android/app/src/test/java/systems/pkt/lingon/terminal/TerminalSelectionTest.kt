@@ -54,6 +54,17 @@ class TerminalSelectionTest {
         assertEquals("s cret", TerminalSelection(TerminalCell(0, 0), TerminalCell(0, 5)).extractText(snapshot))
     }
 
+    @Test
+    fun historyPrependAndRemovalKeepBothEndpointsOrInvalidateEvictedText() {
+        val original = TerminalSelection(TerminalCell(2, 3), TerminalCell(0, 1))
+        val shifted = original.shiftedRows(5, 8)!!
+        assertEquals(TerminalCell(7, 3), shifted.anchor)
+        assertEquals(TerminalCell(5, 1), shifted.focus)
+        assertEquals(original, shifted.shiftedRows(-5, 3))
+        assertEquals(null, shifted.shiftedRows(-6, 2))
+        assertEquals(null, original.shiftedRows(Int.MAX_VALUE, 8))
+    }
+
     private fun snapshot(vararg lines: String): TerminalSnapshot {
         val cols = lines.maxOf { it.length }
         val runes = IntArray(cols * lines.size) { ' '.code }

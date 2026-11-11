@@ -63,7 +63,13 @@ type TUITheme struct {
 	TabMutedActiveFg string
 	TabActiveBg      string
 	TabActiveFg      string
+	DimmedTabs       TUITabColors
 	Reset            string
+}
+
+// TUITabColors contains the colors for a terminal tab-bar variant.
+type TUITabColors struct {
+	Bg, Fg, ActiveBg, ActiveFg, MutedFg, MutedActiveFg string
 }
 
 type colorTokens struct {
@@ -247,6 +253,14 @@ func tokensFromColors(c colorTokens) Tokens {
 }
 
 func tuiFromColors(c colorTokens) TUITheme {
+	dimBg, dimActiveBg := darken(c.tabBg, 0.65), darken(c.tabActiveBg, 0.20)
+	// Dark blues can remain indistinguishable even after reducing dimming.
+	// Lift the focused background just enough to separate it from the bar.
+	for contrastRatio(dimActiveBg, dimBg) < 1.6 {
+		dimActiveBg = lighten(dimActiveBg, 0.05)
+	}
+	dimFg := ensureContrast(darken(c.tabFg, 0.45), dimBg, 3)
+	dimActiveFg := ensureContrast(c.tabActiveFg, dimActiveBg, 4.5)
 	return TUITheme{
 		DialogBg:         c.dialogBg.ANSIBg(),
 		DialogFg:         c.dialogFg.ANSIFg(),
@@ -260,7 +274,13 @@ func tuiFromColors(c colorTokens) TUITheme {
 		TabMutedActiveFg: c.tabMutedActiveFg.ANSIFg(),
 		TabActiveBg:      c.tabActiveBg.ANSIBg(),
 		TabActiveFg:      c.tabActiveFg.ANSIFg(),
-		Reset:            "\x1b[0m",
+		DimmedTabs: TUITabColors{
+			Bg: dimBg.ANSIBg(), Fg: dimFg.ANSIFg(),
+			ActiveBg: dimActiveBg.ANSIBg(), ActiveFg: dimActiveFg.ANSIFg(),
+			MutedFg:       ensureContrast(darken(c.tabMutedFg, 0.45), dimBg, 3).ANSIFg(),
+			MutedActiveFg: ensureContrast(c.tabMutedActiveFg, dimActiveBg, 4.5).ANSIFg(),
+		},
+		Reset: "\x1b[0m",
 	}
 }
 

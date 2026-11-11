@@ -15,18 +15,36 @@ const searchEscapeDelay = 50 * time.Millisecond
 // SearchSession identifies one searchable tab. Names need not be unique.
 type SearchSession struct {
 	ID, Name string
+	// Excluded omits a tab from suggestions and selection while preserving its
+	// position as a cycling origin in the full tab order.
+	Excluded bool
+	// Marked records existing importance without excluding explicit toggles.
+	Marked bool
 }
 
 // SearchView is an atomic snapshot of the search field and highlighted session.
 type SearchView struct {
-	Active                   bool
+	Active, Important        bool
 	Text, Ghost, CandidateID string
+}
+
+// Label identifies the invoking search command or the importance editor.
+// importantOnly records the requested scope even when important mode is inactive.
+func (v SearchView) Label(importantOnly bool) string {
+	if v.Important {
+		return "i "
+	}
+	if importantOnly {
+		return "/ "
+	}
+	return "? "
 }
 
 // SearchResult describes a consumed key, a changed field, or an accepted session.
 type SearchResult struct {
 	Consumed, Changed bool
 	SessionID         string
+	SessionIDs        []string
 }
 
 // SearchPrompt edits a prefix and selects sessions without changing the active tab.
@@ -41,6 +59,7 @@ type SearchPrompt struct {
 	escapeTimer  *clock.Timer
 	generation   uint64
 	onChange     func()
+	important    *importantSearch
 }
 
 // Begin starts a fresh search. onChange redraws after a standalone Escape expires;
@@ -50,6 +69,7 @@ func (p *SearchPrompt) Begin(clk clock.Clock, onChange func(), currentID string)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stopEscape()
+	p.important = nil
 	p.editor.Begin("", clk)
 	p.selected, p.completed = "", false
 	p.origin = currentID
@@ -62,6 +82,7 @@ func (p *SearchPrompt) Close() {
 	defer p.mu.Unlock()
 	p.stopEscape()
 	p.editor = RenamePrompt{}
+	p.important = nil
 	p.onChange = nil
 }
 
@@ -83,8 +104,11 @@ func printableName(name string) string {
 
 func (p *SearchPrompt) candidate(sessions []SearchSession) (SearchSession, bool) {
 	text := string(p.editor.text)
+	if p.important != nil {
+		text = importantToken(text)
+	}
 	for _, session := range sessions {
-		if session.ID == p.selected && strings.HasPrefix(printableName(session.Name), text) {
+		if !session.Excluded && session.ID == p.selected && strings.HasPrefix(printableName(session.Name), text) {
 			return session, true
 		}
 	}
@@ -93,12 +117,12 @@ func (p *SearchPrompt) candidate(sessions []SearchSession) (SearchSession, bool)
 	}
 	// An exact name takes precedence over a longer name with the same prefix.
 	for _, session := range sessions {
-		if printableName(session.Name) == text {
+		if !session.Excluded && printableName(session.Name) == text {
 			return session, true
 		}
 	}
 	for _, session := range sessions {
-		if strings.HasPrefix(printableName(session.Name), text) {
+		if !session.Excluded && strings.HasPrefix(printableName(session.Name), text) {
 			return session, true
 		}
 	}
@@ -109,18 +133,39 @@ func (p *SearchPrompt) candidate(sessions []SearchSession) (SearchSession, bool)
 func (p *SearchPrompt) View(sessions []SearchSession) SearchView {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	view := SearchView{Active: p.editor.Active, Text: printableName(string(p.editor.text))}
+	view := SearchView{Active: p.editor.Active, Important: p.important != nil, Text: printableName(string(p.editor.text))}
 	if view.Active {
 		if session, ok := p.candidate(sessions); ok {
 			p.selected = session.ID
-			view.Ghost = strings.TrimPrefix(printableName(session.Name), view.Text)
+			text := view.Text
+			if p.important != nil {
+				text = importantToken(text)
+			}
+			view.Ghost = strings.TrimPrefix(printableName(session.Name), text)
 			view.CandidateID = session.ID
+		} else if p.important != nil && importantToken(string(p.editor.text)) == "" {
+			// Preview the last committed entry while the next token is empty.
+			for offset, entry := range p.important.entries {
+				if offset+len(entry.Name)+1 != len(p.editor.text) {
+					continue
+				}
+				for _, session := range sessions {
+					if !session.Excluded && session.ID == entry.ID && session.Name == entry.Name {
+						view.CandidateID = entry.ID
+						break
+					}
+				}
+			}
 		}
 	}
 	return view
 }
 
 func (p *SearchPrompt) cycle(sessions []SearchSession, direction int) {
+	if p.important != nil {
+		p.cycleImportant(sessions, direction)
+		return
+	}
 	if len(sessions) == 0 {
 		return
 	}
@@ -130,27 +175,33 @@ func (p *SearchPrompt) cycle(sessions []SearchSession, direction int) {
 		p.selected, p.completed = candidate.ID, true
 		return
 	}
-	next := 0
+	origin := -1
 	if direction < 0 {
-		next = len(sessions) - 1
+		origin = 0
 	}
 	if ok {
 		for i, session := range sessions {
 			if session.ID == candidate.ID {
-				next = (i + direction + len(sessions)) % len(sessions)
+				origin = i
 				break
 			}
 		}
 	} else if len(p.editor.text) == 0 {
 		for i, session := range sessions {
 			if session.ID == p.origin {
-				next = (i + direction + len(sessions)) % len(sessions)
+				origin = i
 				break
 			}
 		}
 	}
-	p.editor.text = []byte(printableName(sessions[next].Name))
-	p.selected, p.completed = sessions[next].ID, true
+	for step := 1; step <= len(sessions); step++ {
+		next := (origin + direction*step + len(sessions)*2) % len(sessions)
+		if !sessions[next].Excluded {
+			p.editor.text = []byte(printableName(sessions[next].Name))
+			p.selected, p.completed = sessions[next].ID, true
+			return
+		}
+	}
 }
 
 func (p *SearchPrompt) stopEscape() {
@@ -213,6 +264,9 @@ func (p *SearchPrompt) Feed(b byte, sessions []SearchSession) SearchResult {
 	if b == 0x1b {
 		p.startEscape()
 		return SearchResult{Consumed: true}
+	}
+	if p.important != nil {
+		return p.feedImportant(b, sessions)
 	}
 	result := SearchResult{Consumed: true, Changed: true}
 	if b == '\r' || b == '\n' {

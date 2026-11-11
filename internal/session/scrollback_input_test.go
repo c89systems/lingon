@@ -8,6 +8,11 @@ func TestScrollbackInputMappings(t *testing.T) {
 		seq  []byte
 		want scrollCommand
 	}{
+		{"visual-v", []byte("v"), scrollVisual},
+		{"select-space", []byte(" "), scrollSelect},
+		{"copy-enter-cr", []byte("\r"), scrollCopy},
+		{"copy-enter-lf", []byte("\n"), scrollCopy},
+		{"reserved-V", []byte("V"), scrollNone},
 		{"exit", []byte("q"), scrollExit},
 		{"line-up-k", []byte("k"), scrollLineUp},
 		{"line-down-j", []byte("j"), scrollLineDown},

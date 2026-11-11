@@ -157,7 +157,7 @@ open class RelayWebSocketClient(private val httpClientProvider: HttpClientProvid
                     retryAfterSeconds = response.header("Retry-After")?.toIntOrNull(),
                 )
             }
-            val raw = response.body?.string().orEmpty()
+            val raw = response.body.string()
             val shareSession = LingonJson.decodeFromString<RelayShareSession>(raw)
             if (shareSession.sessionId.isBlank()) {
                 throw IllegalStateException("share authentication failed: missing session")

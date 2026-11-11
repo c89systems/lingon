@@ -179,7 +179,6 @@ fun TerminalScreen(
         userImeDismissInProgress = false
         viewModel.recordTerminalImeVisibilityForLifecycle(true)
         requestInputFocus?.invoke()
-        Unit
     }
     fun maybeFocusInputForImeRestore(suppressHiddenCapture: Boolean) {
         if (state.restoreTerminalImeOnLifecycleStart == false) {
@@ -1392,7 +1391,7 @@ private class TerminalInputView(
             try {
                 val imm = context.getSystemService(InputMethodManager::class.java)
                 imm?.restartInput(this)
-                imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                imm?.showSoftInput(this, 0)
             } catch (_: RuntimeException) {
                 // Some OEM/emulator IMEs can throw while view focus is transitioning.
             }

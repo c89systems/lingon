@@ -19,6 +19,7 @@ import (
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/pty"
 	"pkt.systems/lingon/internal/relaywire"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/terminal/emu"
 	"pkt.systems/pslog"
@@ -146,7 +147,7 @@ func (h *Host) Run(ctx context.Context) error {
 	hello := &protocolpb.Frame{
 		SessionId: h.SessionID,
 		Payload: &protocolpb.Frame_Hello{Hello: &protocolpb.Hello{
-			ClientId:     strings.TrimSpace(h.SessionName),
+			ClientId:     sessionmanage.NormalizeName(strings.TrimSpace(h.SessionName)),
 			Cols:         uint32(h.Cols),
 			Rows:         uint32(h.Rows),
 			WantsControl: true,

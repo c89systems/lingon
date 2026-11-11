@@ -22,6 +22,7 @@ import (
 	"pkt.systems/lingon/internal/protocolpb"
 	"pkt.systems/lingon/internal/relaywire"
 	"pkt.systems/lingon/internal/retryafter"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/pslog"
 )
@@ -56,10 +57,12 @@ type Publisher struct {
 	OnInput func([]byte)
 	// OnClipboard performs bounded assembly/admission without waiting for a PTY.
 	// It may invoke reply asynchronously after delivery; Reset cancels pending work.
-	OnClipboard            func(context.Context, *protocolpb.Clipboard, func(*protocolpb.Clipboard))
-	OnClipboardReset       func()
-	OnResize               func(*protocolpb.Resize)
-	OnCommand              func(kind protocolpb.CommandKind)
+	OnClipboard      func(context.Context, *protocolpb.Clipboard, func(*protocolpb.Clipboard))
+	OnClipboardReset func()
+	OnResize         func(*protocolpb.Resize)
+	OnCommand        func(kind protocolpb.CommandKind)
+	// OnManagementComplete runs after a management reply has been written.
+	OnManagementComplete   func(*protocolpb.SessionManagement, *protocolpb.SessionManagement)
 	OnManagement           func(context.Context, *protocolpb.SessionManagement) *protocolpb.SessionManagement
 	management             chan *protocolpb.SessionManagement
 	OnControl              func(holderID string)
@@ -469,7 +472,7 @@ func (p *Publisher) helloFrame() *protocolpb.Frame {
 	return &protocolpb.Frame{
 		SessionId: p.opts.SessionID,
 		Payload: &protocolpb.Frame_Hello{Hello: &protocolpb.Hello{
-			ClientId: strings.TrimSpace(p.opts.SessionName),
+			ClientId: sessionmanage.NormalizeName(strings.TrimSpace(p.opts.SessionName)),
 			Cols:     uint32(p.opts.Cols), Rows: uint32(p.opts.Rows),
 			WantsControl: p.opts.PublishControl, ClientType: "host", Headless: p.opts.Headless,
 		}},

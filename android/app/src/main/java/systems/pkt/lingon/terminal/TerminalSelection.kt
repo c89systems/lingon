@@ -1,12 +1,23 @@
 package systems.pkt.lingon.terminal
 
 internal data class TerminalCell(val row: Int, val col: Int) : Comparable<TerminalCell> {
+    fun shiftedRows(delta: Int, rowCount: Int): TerminalCell? {
+        val next = row.toLong() + delta
+        return if (next in 0L until rowCount.toLong()) copy(row = next.toInt()) else null
+    }
+
     override fun compareTo(other: TerminalCell): Int = compareValuesBy(this, other, TerminalCell::row, TerminalCell::col)
 }
 
 internal data class TerminalSelection(val anchor: TerminalCell, val focus: TerminalCell) {
     val start: TerminalCell get() = minOf(anchor, focus)
     val end: TerminalCell get() = maxOf(anchor, focus)
+
+    fun shiftedRows(delta: Int, rowCount: Int): TerminalSelection? {
+        val nextAnchor = anchor.shiftedRows(delta, rowCount) ?: return null
+        val nextFocus = focus.shiftedRows(delta, rowCount) ?: return null
+        return TerminalSelection(nextAnchor, nextFocus)
+    }
 
     fun contains(row: Int, col: Int): Boolean = TerminalCell(row, col) in start..end
 

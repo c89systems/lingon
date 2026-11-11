@@ -23,14 +23,16 @@ type Emulator struct {
 	cursorVisible bool
 	title         string
 
-	wrapPending bool
-	wrapMode    bool
-	originMode  bool
-	insertMode  bool
-	newLineMode bool
-	appCursor   bool
+	wrapPending    bool
+	wrapMode       bool
+	originMode     bool
+	insertMode     bool
+	newLineMode    bool
+	appCursor      bool
+	bracketedPaste bool
 
-	attr cellAttr
+	hyperlink string
+	attr      cellAttr
 
 	parser parserState
 
@@ -60,9 +62,10 @@ type Emulator struct {
 }
 
 type cellAttr struct {
-	mode int16
-	fg   uint32
-	bg   uint32
+	mode           int16
+	fg             uint32
+	bg             uint32
+	underlineColor uint32
 }
 
 const cursorTraceLimit = 64
@@ -250,9 +253,11 @@ func (e *Emulator) LoadSnapshot(snap terminal.Snapshot) {
 	e.originMode = snap.Mode&terminal.SnapshotModeOrigin != 0
 	e.insertMode = snap.Mode&terminal.SnapshotModeInsert != 0
 	e.appCursor = snap.Mode&terminal.SnapshotModeAppCursor != 0
+	e.bracketedPaste = snap.Mode&terminal.SnapshotModeBracketedPaste != 0
 	e.newLineMode = false
 	e.tabStops = defaultTabs(cols)
 	e.resetAttributes()
+	e.hyperlink = ""
 	e.inlineOriginRow = 0
 	e.inlineOriginSet = false
 }
@@ -278,6 +283,9 @@ func (e *Emulator) modeFlags() uint32 {
 	}
 	if e.appCursor {
 		flags |= terminal.SnapshotModeAppCursor
+	}
+	if e.bracketedPaste {
+		flags |= terminal.SnapshotModeBracketedPaste
 	}
 	return flags
 }
@@ -545,7 +553,8 @@ func (e *Emulator) handleOSCByte(b byte) {
 		e.parser.oscEsc = true
 		return
 	}
-	if b == 0x07 {
+	// A raw C1 ST terminates OSC, but 0x9c can also continue a UTF-8 rune.
+	if b == 0x07 || (b == 0x9c && utf8.Valid(e.parser.oscBuf)) {
 		e.parser.state = stateGround
 		e.handleOSC()
 		return
@@ -619,6 +628,9 @@ func (e *Emulator) handlePrintableByte(b byte) {
 func (e *Emulator) handleOSC() {
 	old := e.snapshotState()
 	code, payload := parseOSC(e.parser.oscBuf)
+	if code == 8 {
+		e.hyperlink = terminal.NormalizeHyperlink(payload)
+	}
 	if code == 0 || code == 2 {
 		e.title = payload
 	}
@@ -704,7 +716,7 @@ func (e *Emulator) handleCSI(final byte, params []int, private byte, rawParams s
 		e.traceEvent("SD", final, private, params, old, 0)
 	case 'm':
 		if private == 0 {
-			e.selectGraphicRendition(params, rawParams)
+			e.selectGraphicRendition(rawParams)
 			e.traceEvent("SGR", final, private, params, old, 0)
 		} else {
 			e.traceEvent("CSI_PRIVATE_UNHANDLED", final, private, params, old, 0)
@@ -795,19 +807,23 @@ func (e *Emulator) setCell(x, y int, r rune, grapheme string, width int) {
 	}
 	idx := e.scr.index(x, y)
 	e.scr.cells[idx] = terminal.Cell{
-		Rune:     r,
-		Grapheme: grapheme,
-		Mode:     e.attr.mode,
-		FG:       e.attr.fg,
-		BG:       e.attr.bg,
+		Rune:           r,
+		Grapheme:       grapheme,
+		Mode:           e.attr.mode,
+		FG:             e.attr.fg,
+		BG:             e.attr.bg,
+		UnderlineColor: e.attr.underlineColor,
+		Hyperlink:      e.hyperlink,
 	}
 	if width == 2 && x+1 < e.cols {
 		contIdx := e.scr.index(x+1, y)
 		e.scr.cells[contIdx] = terminal.Cell{
-			Rune: 0,
-			Mode: e.attr.mode,
-			FG:   e.attr.fg,
-			BG:   e.attr.bg,
+			Rune:           0,
+			Mode:           e.attr.mode,
+			FG:             e.attr.fg,
+			BG:             e.attr.bg,
+			UnderlineColor: e.attr.underlineColor,
+			Hyperlink:      e.hyperlink,
 		}
 	}
 }
@@ -1277,6 +1293,8 @@ func (e *Emulator) setMode(params []int, private byte, enable bool) {
 				e.cursorPositionWithReason(1, 1, "DECOM")
 			case 1:
 				e.appCursor = enable
+			case 2004:
+				e.bracketedPaste = enable
 			case 47, 1047, 1049:
 				e.setAltScreen(enable, p == 1049)
 			}
@@ -1320,19 +1338,30 @@ func (e *Emulator) setAltScreen(enable bool, saveCursor bool) {
 	}
 }
 
-func (e *Emulator) selectGraphicRendition(params []int, rawParams string) {
-	params = normalizeSGRParams(params, rawParams)
-	if len(params) == 0 {
-		params = []int{0}
-	} else {
-		for i := range params {
-			if params[i] == -1 {
-				params[i] = 0
-			}
-		}
-	}
+func (e *Emulator) selectGraphicRendition(rawParams string) {
+	// Keep colon subparameters grouped. They describe a single attribute;
+	// interpreting a color component as its own SGR code can reset/faint text.
+	var storage [16]sgrParameter
+	params := parseSGRParameters(rawParams, storage[:0])
 	for i := 0; i < len(params); i++ {
-		switch params[i] {
+		param := params[i]
+		code := param.code
+		if param.hasSub {
+			switch code {
+			case 4:
+				if style, err := strconv.Atoi(param.sub); err == nil {
+					e.setUnderlineStyle(style)
+				} else if param.sub == "" {
+					e.setUnderlineStyle(1)
+				}
+			case 38, 48, 58:
+				if color, ok := sgrColonColor(param.sub); ok {
+					e.setColor(code, color)
+				}
+			}
+			continue
+		}
+		switch code {
 		case 0:
 			e.resetAttributes()
 		case 1:
@@ -1342,19 +1371,21 @@ func (e *Emulator) selectGraphicRendition(params []int, rawParams string) {
 		case 3:
 			e.attr.mode |= terminal.ModeItalic
 		case 4:
-			e.attr.mode |= terminal.ModeUnderline
+			e.setUnderlineStyle(1)
 		case 5:
 			e.attr.mode |= terminal.ModeBlink
 		case 7:
 			e.attr.mode |= terminal.ModeInverse
 		case 8:
 			e.attr.mode |= terminal.ModeHidden
+		case 21:
+			e.setUnderlineStyle(2)
 		case 22:
-			e.attr.mode &^= (terminal.ModeBold | terminal.ModeFaint)
+			e.attr.mode &^= terminal.ModeBold | terminal.ModeFaint
 		case 23:
 			e.attr.mode &^= terminal.ModeItalic
 		case 24:
-			e.attr.mode &^= terminal.ModeUnderline
+			e.setUnderlineStyle(0)
 		case 25:
 			e.attr.mode &^= terminal.ModeBlink
 		case 27:
@@ -1365,96 +1396,124 @@ func (e *Emulator) selectGraphicRendition(params []int, rawParams string) {
 			e.attr.fg = terminal.ColorDefault
 		case 49:
 			e.attr.bg = terminal.ColorDefault
-		default:
-			if params[i] >= 30 && params[i] <= 37 {
-				e.attr.fg = terminal.ColorIndexed | uint32(params[i]-30)
-			} else if params[i] >= 40 && params[i] <= 47 {
-				e.attr.bg = terminal.ColorIndexed | uint32(params[i]-40)
-			} else if params[i] >= 90 && params[i] <= 97 {
-				e.attr.fg = terminal.ColorIndexed | uint32(params[i]-90+8)
-			} else if params[i] >= 100 && params[i] <= 107 {
-				e.attr.bg = terminal.ColorIndexed | uint32(params[i]-100+8)
-			} else if params[i] == 38 || params[i] == 48 {
-				isFg := params[i] == 38
-				if i+1 < len(params) && params[i+1] == 5 && i+2 < len(params) {
-					if isFg {
-						e.attr.fg = terminal.ColorIndexed256 | uint32(params[i+2])
-					} else {
-						e.attr.bg = terminal.ColorIndexed256 | uint32(params[i+2])
-					}
-					i += 2
-				} else if i+1 < len(params) && params[i+1] == 2 && i+4 < len(params) {
-					color := uint32(params[i+2])<<16 | uint32(params[i+3])<<8 | uint32(params[i+4])
-					if isFg {
-						e.attr.fg = terminal.ColorTrue | color
-					} else {
-						e.attr.bg = terminal.ColorTrue | color
-					}
-					i += 4
+		case 59:
+			e.attr.underlineColor = terminal.ColorDefault
+		case 38, 48, 58:
+			// Semicolon forms consume their own color parameters even if invalid.
+			if i+1 >= len(params) || params[i+1].hasSub {
+				continue
+			}
+			count := 1
+			switch params[i+1].code {
+			case 5:
+				count = 2
+			case 2:
+				count = 4
+			}
+			end := min(i+1+count, len(params))
+			var components [4]int
+			colorParams := components[:0]
+			for _, p := range params[i+1 : end] {
+				if p.hasSub {
+					colorParams = nil
+					break
 				}
+				colorParams = append(colorParams, p.code)
+			}
+			if color, ok := sgrColor(colorParams); ok {
+				e.setColor(code, color)
+			}
+			i = end - 1
+		default:
+			if code >= 30 && code <= 37 {
+				e.attr.fg = terminal.ColorIndexed | uint32(code-30)
+			} else if code >= 40 && code <= 47 {
+				e.attr.bg = terminal.ColorIndexed | uint32(code-40)
+			} else if code >= 90 && code <= 97 {
+				e.attr.fg = terminal.ColorIndexed | uint32(code-90+8)
+			} else if code >= 100 && code <= 107 {
+				e.attr.bg = terminal.ColorIndexed | uint32(code-100+8)
 			}
 		}
 	}
 }
 
-func normalizeSGRParams(params []int, rawParams string) []int {
-	if !strings.Contains(rawParams, ":") {
-		return params
+func (e *Emulator) setUnderlineStyle(style int) {
+	if style < 0 || style > 5 {
+		return
 	}
-	fields := strings.Split(rawParams, ";")
-	normalized := make([]int, 0, len(params))
-	for _, field := range fields {
-		if field == "" {
-			normalized = append(normalized, -1)
-			continue
-		}
-		parts := strings.Split(field, ":")
-		code, ok := parseSGRParamPart(parts[0])
-		if !ok {
-			normalized = append(normalized, -1)
-			continue
-		}
-		if code == 4 && len(parts) > 1 {
-			style, ok := firstSGRSubParam(parts[1:])
-			if ok && style == 0 {
-				normalized = append(normalized, 24)
-			} else {
-				normalized = append(normalized, 4)
-			}
-			continue
-		}
-		normalized = append(normalized, code)
-		for _, part := range parts[1:] {
-			value, ok := parseSGRParamPart(part)
-			if ok {
-				normalized = append(normalized, value)
-			}
-		}
+	e.attr.mode &^= terminal.ModeUnderlineMask
+	if style > 0 {
+		e.attr.mode |= terminal.ModeUnderline | int16(style-1)<<7
 	}
-	if len(normalized) == 0 {
-		return params
-	}
-	return normalized
 }
 
-func firstSGRSubParam(parts []string) (int, bool) {
-	for _, part := range parts {
-		if value, ok := parseSGRParamPart(part); ok {
-			return value, true
-		}
+func (e *Emulator) setColor(code int, color uint32) {
+	switch code {
+	case 38:
+		e.attr.fg = color
+	case 48:
+		e.attr.bg = color
+	case 58:
+		e.attr.underlineColor = color
 	}
-	return 0, false
 }
 
-func parseSGRParamPart(part string) (int, bool) {
-	if part == "" {
+type sgrParameter struct {
+	code   int
+	sub    string
+	hasSub bool
+}
+
+func parseSGRParameters(raw string, params []sgrParameter) []sgrParameter {
+	for field := range strings.SplitSeq(raw, ";") {
+		primary, sub, hasSub := strings.Cut(field, ":")
+		code := -1
+		if value, err := strconv.Atoi(primary); err == nil {
+			code = value
+		} else if primary == "" && !hasSub {
+			code = 0
+		}
+		params = append(params, sgrParameter{code: code, sub: sub, hasSub: hasSub})
+	}
+	return params
+}
+
+func sgrColonColor(raw string) (uint32, bool) {
+	var parts [5]int
+	n := 0
+	for part := range strings.SplitSeq(raw, ":") {
+		if n == len(parts) {
+			return 0, false
+		}
+		value := -1
+		if parsed, err := strconv.Atoi(part); err == nil {
+			value = parsed
+		}
+		parts[n] = value
+		n++
+	}
+	return sgrColor(parts[:n])
+}
+
+func sgrColor(parts []int) (uint32, bool) {
+	if len(parts) == 2 && parts[0] == 5 && parts[1] >= 0 && parts[1] <= 255 {
+		return terminal.ColorIndexed256 | uint32(parts[1]), true
+	}
+	if len(parts) == 5 && parts[0] == 2 && (parts[1] == -1 || parts[1] == 0) {
+		// ISO colon form has an optional (default/RGB) color-space slot.
+		parts = parts[1:]
+		parts[0] = 2
+	}
+	if len(parts) != 4 || parts[0] != 2 {
 		return 0, false
 	}
-	value, err := strconv.Atoi(part)
-	if err != nil {
-		return 0, false
+	for _, c := range parts[1:] {
+		if c < 0 || c > 255 {
+			return 0, false
+		}
 	}
-	return value, true
+	return terminal.ColorTrue | uint32(parts[1])<<16 | uint32(parts[2])<<8 | uint32(parts[3]), true
 }
 
 func (e *Emulator) eraseCell() terminal.Cell {
@@ -1475,11 +1534,13 @@ func (e *Emulator) resetAttributes() {
 }
 
 func (e *Emulator) reset() {
+	e.hyperlink = ""
 	e.resetAttributes()
 	e.wrapMode = true
 	e.originMode = false
 	e.insertMode = false
 	e.newLineMode = false
+	e.bracketedPaste = false
 	e.cursorVisible = true
 	e.wrapPending = false
 	e.title = ""

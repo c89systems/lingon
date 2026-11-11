@@ -1,5 +1,25 @@
 package mvu
 
+import (
+	"slices"
+
+	"google.golang.org/protobuf/proto"
+	"pkt.systems/lingon/internal/protocolpb"
+)
+
+// Replace installs a completed history replay. An identical replay retains its
+// coordinate generation, so another viewer joining cannot invalidate a cursor
+// or selection in unchanged text.
+func (b *ProtoScrollbackBuffer) Replace(other *ProtoScrollbackBuffer) {
+	if b == nil || other == nil {
+		return
+	}
+	if b.cols == other.cols && slices.EqualFunc(b.rows, other.rows, func(a, b *protocolpb.ScrollbackRow) bool { return proto.Equal(a, b) }) {
+		return
+	}
+	b.Apply(&protocolpb.Scrollback{Clear: true, Cols: uint32(other.cols), Rows: other.rows})
+}
+
 // ScrollbackPosition identifies history advancement independently of retained
 // row count. A generation change denotes replacement rather than appended rows.
 type ScrollbackPosition struct {
@@ -31,6 +51,9 @@ func (v *ScrollbackViewport) SyncHistory(position ScrollbackPosition) {
 	if v.historyKnown && (position.Generation < v.history.Generation ||
 		(position.Generation == v.history.Generation && position.End < v.history.End)) {
 		return
+	}
+	if v.historyKnown && position.Generation != v.history.Generation {
+		v.copy = scrollbackCopy{}
 	}
 	if v.active && v.historyKnown && position.Generation == v.history.Generation && position.End >= v.history.End {
 		v.offset += position.End - v.history.End

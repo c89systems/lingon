@@ -166,14 +166,14 @@ window.fetch = async (...args) => {
 	}
 	assertManagementRequests()
 	t.Log("rename HTTP sequence verified")
-	if err := chromedp.Do(ctx, chromedp.Poll[chromedp.Void](`document.getElementById('tab-list').textContent.includes('Web build 🦊')`)); err != nil {
+	if err := chromedp.Do(ctx, chromedp.Poll[chromedp.Void](`document.getElementById('tab-list').textContent.includes('Web_build_🦊')`)); err != nil {
 		var debug string
 		_ = chromedp.Do(ctx, capture(&debug, chromedp.Evaluate[string](`JSON.stringify({calls: window.__managementCalls, state: window.__bifrons.debug.state, tabs: document.getElementById('tab-list').textContent, status: document.getElementById('status-banner').textContent})`)))
 		original, _ := store.GetSession("web-source")
 		t.Fatalf("renamed tab: %v relay=%+v browser=%s", err, original, debug)
 	}
 	original, _ := store.GetSession("web-source")
-	if original.Name != "Web build 🦊" {
+	if original.Name != "Web_build_🦊" {
 		t.Fatalf("rename did not reach host: %+v", original)
 	}
 	t.Log("rename UI and relay metadata verified")
@@ -204,7 +204,7 @@ window.fetch = async (...args) => {
 		t.Fatal(err)
 	}
 	path, _ := headless.SocketPath(cfg, "web-source")
-	if state.Sessions["web-source"].SocketPath != path || state.Sessions["web-source"].Name != "Web build 🦊" {
+	if state.Sessions["web-source"].SocketPath != path || state.Sessions["web-source"].Name != "Web_build_🦊" {
 		t.Fatal("rename changed socket identity or was not retained by host")
 	}
 	if !expiredAccess {

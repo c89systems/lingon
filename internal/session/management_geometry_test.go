@@ -45,7 +45,7 @@ func TestDetachedCreationCapturesCoherentGeometryDuringResize(t *testing.T) {
 	}
 	r := New(Options{ConfigDir: t.TempDir(), Cols: 80, Rows: 24, HeadlessExecutable: executable})
 	// Inert target state only: no newLocalSession, Run, terminal or raw mode.
-	local := &localSession{id: "parent", cols: 80, rows: 24}
+	local := &localSession{directory: sessionmanage.NewDirectory(t.TempDir()), id: "parent", cols: 80, rows: 24}
 	r.localSessions = map[string]*localSession{"parent": local}
 	started, stop, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
@@ -86,7 +86,7 @@ func TestDetachedCreationUsesCurrentTargetState(t *testing.T) {
 			r := New(Options{ConfigDir: t.TempDir(), Cols: 80, Rows: 24,
 				Offline: startupOffline, Publish: true, Endpoint: "https://relay.invalid/v1", HeadlessExecutable: executable})
 			// Inert synchronized state: no PTY, raw mode or terminal access.
-			local := &localSession{id: "parent", cols: 120, rows: 40, offline: startupOffline}
+			local := &localSession{directory: sessionmanage.NewDirectory(t.TempDir()), id: "parent", cols: 120, rows: 40, offline: startupOffline}
 			local.ToggleOffline()
 			r.localSessions = map[string]*localSession{"parent": local}
 			result := r.Manage(context.Background(), sessionmanage.Request{RequestID: "current-state", SessionID: "parent", Kind: "create"})

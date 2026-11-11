@@ -1062,6 +1062,9 @@ func cloneScrollbackRow(row *protocolpb.ScrollbackRow) *protocolpb.ScrollbackRow
 		return &protocolpb.ScrollbackRow{}
 	}
 	out := &protocolpb.ScrollbackRow{}
+	if len(row.Hyperlinks) > 0 {
+		out.Hyperlinks = append([]string(nil), row.Hyperlinks...)
+	}
 	if len(row.Runes) > 0 {
 		out.Runes = append(out.Runes, row.Runes...)
 	}
@@ -1070,6 +1073,9 @@ func cloneScrollbackRow(row *protocolpb.ScrollbackRow) *protocolpb.ScrollbackRow
 	}
 	if len(row.Fg) > 0 {
 		out.Fg = append(out.Fg, row.Fg...)
+	}
+	if len(row.UnderlineColor) > 0 {
+		out.UnderlineColor = append(out.UnderlineColor, row.UnderlineColor...)
 	}
 	if len(row.Bg) > 0 {
 		out.Bg = append(out.Bg, row.Bg...)

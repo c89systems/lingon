@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"pkt.systems/lingon/internal/mvu"
@@ -15,77 +13,34 @@ import (
 
 type restoreRequest struct{ cols, rows, localCols, localRows int }
 
-// A terminal window outlives its selected tab. Requests remain pending when the
-// issuing client is hidden; observing a newer request also acknowledges older
-// ones whose SIGWINCH events were coalesced by the terminal.
-type restoreWindow struct {
-	mu      sync.Mutex
-	pending []terminal.WindowSize
-}
-
-func (w *restoreWindow) requested(size terminal.WindowSize) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	// Repeating the same target need not produce another SIGWINCH. Keep only
-	// one consecutive request so it cannot later swallow a real user resize.
-	if len(w.pending) > 0 && w.pending[len(w.pending)-1] == size {
-		return
-	}
-	w.pending = append(w.pending, size)
-}
-
-func (w *restoreWindow) acknowledge(size terminal.WindowSize) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for i, pending := range w.pending {
-		if pending == size {
-			w.pending = w.pending[i+1:]
-			return true
-		}
-	}
-	return false
-}
-
-func (w *restoreWindow) latest() terminal.WindowSize {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if len(w.pending) == 0 {
-		return terminal.WindowSize{}
-	}
-	return w.pending[len(w.pending)-1]
-}
-
 func (c *Client) restoreEnabled() bool {
+	if c.isEmbedded() {
+		return false
+	}
 	return c.restoreState().Load()
 }
 
 // restoreState may be called by host render callbacks before Run starts. Both
 // paths must initialize through the same barrier; a supplied multi-attach mode
 // stays shared across clients.
-func (c *Client) restoreState() *atomic.Bool {
+func (c *Client) restoreState() *terminal.WindowRestore {
 	c.restoreOnce.Do(func() {
-		if c.restoreMode == nil {
-			c.restoreMode = newRestoreMode(c.Restore)
-		}
-		if c.restoreWindow == nil {
-			c.restoreWindow = &restoreWindow{}
+		if c.WindowRestore == nil {
+			c.WindowRestore = terminal.NewWindowRestore(c.Restore)
 		}
 		if c.restoreManual == nil {
 			c.restoreManual = &terminal.WindowSizeRequest{}
 		}
 	})
-	return c.restoreMode
-}
-
-func newRestoreMode(enabled bool) *atomic.Bool {
-	mode := &atomic.Bool{}
-	mode.Store(enabled)
-	return mode
+	return c.WindowRestore
 }
 
 // restoreTerminalLocked restores the selected grid once per activation. Ordinary
 // frames do not fight user resizing. renderMu serializes window requests with frames.
 func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
+	if c.isEmbedded() {
+		return
+	}
 	if snap == nil {
 		return
 	}
@@ -117,7 +72,7 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 	if manual := c.restoreManual.Pending(); manual.Cols > 0 && manual.Rows > 0 {
 		cols, rows = manual.Cols, manual.Rows
 	}
-	pending := c.restoreWindow.latest()
+	pending := c.WindowRestore.Latest()
 	target := terminal.WindowSize{Cols: cols, Rows: rows}
 	if cols == localCols && rows == localRows && (pending == (terminal.WindowSize{}) || pending == target) {
 		c.restoreRequest = restoreRequest{}
@@ -128,7 +83,7 @@ func (c *Client) restoreTerminalLocked(snap *protocolpb.Snapshot) {
 	if err := writeAll(c.clock(), c.stdoutWriter(), terminal.WindowResizeSequence(target)); err != nil {
 		return
 	}
-	c.restoreWindow.requested(target)
+	c.WindowRestore.Requested(target)
 	scheduler, ctx := c.effectRuntime()
 	scheduler.Schedule(ctx, "restore-size", time.Second, func() {
 		c.renderMu.Lock()
@@ -175,7 +130,7 @@ func (c *Client) processTerminalResize(ctx context.Context, allowNormal bool) er
 	cols, rows := c.terminalSize()
 	actual := terminal.WindowSize{Cols: cols, Rows: rows}
 	manual := false
-	acknowledged := c.restoreWindow.acknowledge(actual)
+	acknowledged := c.WindowRestore.Acknowledge(actual)
 	if acknowledged {
 		c.restoreLocal = actual
 		if c.restoreRequest.cols == cols && c.restoreRequest.rows == rows {
@@ -198,6 +153,11 @@ func (c *Client) processTerminalResize(ctx context.Context, allowNormal bool) er
 	} else if !acknowledged && !c.restoreEnabled() && allowNormal {
 		err = c.SendResize(ctx, cols, rows)
 	}
+	c.scrollbackMu.Lock()
+	if c.scrollbackView.Visual() {
+		c.syncScrollbackLocked()
+	}
+	c.scrollbackMu.Unlock()
 	c.RenderCurrentFull()
 	return err
 }
@@ -226,3 +186,12 @@ func (c *Client) applyRestoreManualResize(ctx context.Context) error {
 	frame := &protocolpb.Frame{Payload: &protocolpb.Frame_Resize{Resize: &protocolpb.Resize{Cols: uint32(size.Cols), Rows: uint32(size.Rows), Explicit: true}}}
 	return c.writeFrame(ctx, ws, frame)
 }
+
+// ProcessTerminalResize handles a window event when an embedding host owns input
+// and resize signals. Programmatic acknowledgements never resize the session.
+func (c *Client) ProcessTerminalResize(ctx context.Context, allowNormal bool) error {
+	return c.processTerminalResize(ctx, allowNormal)
+}
+
+// ToggleRestore toggles window-wide restore mode and resets this view's activation.
+func (c *Client) ToggleRestore() bool { return c.toggleRestore() }

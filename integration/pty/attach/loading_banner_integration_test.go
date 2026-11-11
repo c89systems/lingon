@@ -57,7 +57,7 @@ func TestAttachFastReadyDoesNotLeaveLoadingBanner(t *testing.T) {
 	ptytest.Advance(h.Clock(), 4*time.Second)
 	attachSess.Eventually(2*time.Second, 50*time.Millisecond, func(screen ptytest.Screen) error {
 		row := screen.Row(0)
-		if strings.Contains(row, "connected to ") {
+		if hasConnectedBanner(row) {
 			return fmt.Errorf("expected connected banner cleared, row=%q", row)
 		}
 		if strings.Contains(row, "loading from relay") {
@@ -96,7 +96,7 @@ func TestMultiAttachStartupConnectedBannerOverlaysPromptInsteadOfBlankingRow(t *
 
 	attachSess.Eventually(2*time.Second, 40*time.Millisecond, func(screen ptytest.Screen) error {
 		row := screen.Row(0)
-		if !strings.Contains(row, "connected to ") {
+		if !hasConnectedBanner(row) {
 			return fmt.Errorf("waiting for connected banner, row=%q", row)
 		}
 		if !strings.Contains(row, "PROMPT>") {

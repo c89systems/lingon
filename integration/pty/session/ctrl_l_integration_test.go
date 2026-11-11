@@ -32,7 +32,7 @@ func TestCtrlLClearAutoHideTabBarWithBanner(t *testing.T) {
 
 	bannerPresent := false
 	host.Eventually(2*time.Second, 50*time.Millisecond, func(screen ptytest.Screen) error {
-		if screen.Contains("connected to ") {
+		if hasConnectedBanner(screen.Row(0)) {
 			bannerPresent = true
 		}
 		return nil
@@ -55,11 +55,11 @@ func TestCtrlLClearAutoHideTabBarWithBanner(t *testing.T) {
 			return fmt.Errorf("expected tab bar hidden after ctrl+l clear; got %q", row)
 		}
 		if bannerPresent {
-			if !strings.Contains(row, "connected to ") {
+			if !hasConnectedBanner(row) {
 				return fmt.Errorf("expected banner to remain on top row while tab bar auto-hides; got %q", row)
 			}
 			row2 := screen.Row(1)
-			if strings.Contains(row2, "connected to ") {
+			if hasConnectedBanner(row2) {
 				return fmt.Errorf("expected no duplicate banner on row 2; got %q", row2)
 			}
 		}

@@ -39,7 +39,7 @@ func TestOfflineHostRenameUpdatesVisibleTabWithoutRelay(t *testing.T) {
 	host.Send("\x0ceOffline renamed\r")
 	host.Eventually(5*time.Second, 50*time.Millisecond, func(screen ptytest.Screen) error {
 		row := screen.Row(0)
-		if !strings.Contains(row, "Offline renamed") || strings.Contains(row, "offline-original") {
+		if !strings.Contains(row, "Offline_renamed") || strings.Contains(row, "offline-original") {
 			return fmt.Errorf("rename did not update tab: %q", row)
 		}
 		return nil

@@ -351,7 +351,7 @@ func applyStatus(r *Runtime, in StatusInput) bool {
 		r.hideConnection()
 	case StatusConnected:
 		if msg == "" {
-			msg = ConnectedToMessage(in.Endpoint)
+			msg = ConnectedMessage
 		}
 		r.showConnected(msg, in.Duration)
 	case StatusError:

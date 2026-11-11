@@ -34,6 +34,7 @@ import (
 	"pkt.systems/lingon/internal/testutil"
 	"pkt.systems/lingon/internal/tlsmgr"
 	"pkt.systems/lingon/internal/trace"
+	"pkt.systems/pslog"
 )
 
 // Harness provisions an in-process server and PTY-backed clients.
@@ -453,6 +454,12 @@ func (h *Harness) startProxy() {
 
 // HostOptions configures a PTY-backed host session.
 type HostOptions struct {
+	Restore          bool
+	Respawn          bool
+	WorkingDirectory string
+	// ConfigDir and HeadlessExecutable isolate detached children created by UI tests.
+	ConfigDir          string
+	HeadlessExecutable string
 	// Geometry overrides host startup dimensions independently of the owned outer PTY.
 	Geometry *terminal.WindowSize
 	// AllowRemoteResize publishes a headless-style viewport that controllers may resize.
@@ -551,7 +558,9 @@ func (h *Harness) StartHost(opts HostOptions) *PTYSession {
 		hostCols, hostRows = opts.Geometry.Cols, opts.Geometry.Rows
 	}
 	resizeCh := make(chan struct{}, 1)
-	runner := session.New(session.Options{
+	runner := session.New(session.Options{WorkingDirectory: opts.WorkingDirectory, Respawn: opts.Respawn, Restore: opts.Restore,
+		ConfigDir:                   opts.ConfigDir,
+		HeadlessExecutable:          opts.HeadlessExecutable,
 		AllowRemoteResize:           opts.AllowRemoteResize,
 		OnPublishFrame:              opts.OnPublishFrame,
 		ClipboardReader:             opts.ClipboardReader,
@@ -732,7 +741,7 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 	}
 	if authFile != "" {
 		client.TokenRefresher = relayclient.TokenRefresher(h.endpoint, authFile, h.tlsDir, false, func(token string) {
-			client.AccessToken = token
+			client.SetAccessToken(token)
 		})
 	}
 
@@ -761,6 +770,8 @@ func (h *Harness) StartAttach(opts AttachOptions) *PTYSession {
 
 // MultiAttachOptions configures a PTY-backed multi-session attach client.
 type MultiAttachOptions struct {
+	// Logger observes client events without changing process-wide logging.
+	Logger pslog.Logger
 	// Geometry overrides logical startup dimensions without resizing the owned outer PTY.
 	Geometry *terminal.WindowSize
 	// Restore enables remote-size following in this test-owned PTY.
@@ -856,6 +867,7 @@ func (h *Harness) StartMultiAttach(opts MultiAttachOptions) *PTYSession {
 		opts.DesktopNotifier,
 	)
 	client := &attach.MultiClient{
+		Logger:  opts.Logger,
 		Restore: opts.Restore,
 		Cols:    geometryCols(opts.Geometry), Rows: geometryRows(opts.Geometry),
 		Endpoint:                    endpoint,

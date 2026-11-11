@@ -1,10 +1,41 @@
 package attach
 
 import (
+	"sync"
 	"testing"
 
+	"pkt.systems/lingon/internal/clock"
 	"pkt.systems/lingon/internal/mvu"
 )
+
+func TestClientCompositorConcurrentStartupAndTabActivation(t *testing.T) {
+	c := &Client{Clock: clock.NewMock()}
+	owner := mvu.NewRuntime()
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		<-start
+		for range 1000 {
+			c.SetCompositor(owner)
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		for range 1000 {
+			if c.ensureCompositor() == nil {
+				t.Error("startup has no compositor")
+			}
+		}
+	}()
+	close(start)
+	workers.Wait()
+	if c.Compositor() != owner {
+		t.Fatal("tab activation lost the owner's compositor")
+	}
+}
 
 func TestClientSetCompositorPreservesOwnerContext(t *testing.T) {
 	ui := mvu.NewRuntime()

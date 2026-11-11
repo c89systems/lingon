@@ -8,7 +8,7 @@ import (
 )
 
 func TestSearchCompletionAndCycling(t *testing.T) {
-	sessions := []SearchSession{{"a", "alpha"}, {"b", "alpine"}, {"c", "beta"}, {"d", "beta"}}
+	sessions := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "alpine"}, {ID: "c", Name: "beta"}, {ID: "d", Name: "beta"}}
 	var p SearchPrompt
 	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
@@ -34,7 +34,7 @@ func TestSearchCompletionAndCycling(t *testing.T) {
 }
 
 func TestEmptySearchCyclesRelativeToOrigin(t *testing.T) {
-	sessions := []SearchSession{{"a", "alpha"}, {"b", "same"}, {"c", "same"}, {"d", "delta"}}
+	sessions := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "same"}, {ID: "c", Name: "same"}, {ID: "d", Name: "delta"}}
 	for _, tc := range []struct{ origin, keys, want string }{
 		{"b", "\t", "c"}, {"b", "\x1b[Z", "a"},
 		{"d", "\t", "a"}, {"a", "\x1b[Z", "d"},
@@ -66,7 +66,7 @@ func TestEmptySearchCyclesRelativeToOrigin(t *testing.T) {
 }
 
 func TestSearchEnterExactGhostDuplicateAndMissing(t *testing.T) {
-	sessions := []SearchSession{{"long", "alphabet"}, {"exact", "alpha"}, {"dup", "alpha"}, {"unicode", "räv 🦊"}}
+	sessions := []SearchSession{{ID: "long", Name: "alphabet"}, {ID: "exact", Name: "alpha"}, {ID: "dup", Name: "alpha"}, {ID: "unicode", Name: "räv 🦊"}}
 	for _, tc := range []struct {
 		keys, id string
 		done     bool
@@ -107,14 +107,14 @@ func TestSearchRefreshAndSafeText(t *testing.T) {
 	var p SearchPrompt
 	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
-	sessions := []SearchSession{{"a", "alpha"}, {"b", "beta"}}
+	sessions := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "beta"}}
 	p.Feed('\t', sessions)
 	if result := p.Feed('\r', sessions[1:]); result.SessionID != "" || !p.View(sessions[1:]).Active {
 		t.Fatalf("selected removed session %+v", result)
 	}
 	p.Begin(clock.NewMock(), nil, "")
 	defer p.Close()
-	p.Feed('\t', []SearchSession{{"a", "a\x1b[2J\n"}})
+	p.Feed('\t', []SearchSession{{ID: "a", Name: "a\x1b[2J\n"}})
 	if view := p.View(nil); view.Text != "a[2J" {
 		t.Fatalf("unsafe text %q", view.Text)
 	}
@@ -127,7 +127,7 @@ func TestSearchRefreshAndSafeText(t *testing.T) {
 }
 
 func TestSearchAndRestorePrefix(t *testing.T) {
-	for key, want := range map[byte]Action{'/': ActionSearch, '!': ActionToggleRestore} {
+	for key, want := range map[byte]Action{'/': ActionSearchImportant, '?': ActionSearch, '!': ActionToggleRestore} {
 		var p Prefix
 		p.Feed(CtrlL)
 		if action, out := p.Feed(key); action != want || len(out) != 0 {
@@ -169,7 +169,7 @@ func TestSearchCandidateIdentityFollowsEditingAndDuplicateCycling(t *testing.T) 
 }
 
 func TestSearchReverseCycling(t *testing.T) {
-	sessions := []SearchSession{{"a", "alpha"}, {"b", "alpha"}, {"c", "beta"}, {"d", "räv 🦊"}}
+	sessions := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "alpha"}, {ID: "c", Name: "beta"}, {ID: "d", Name: "räv 🦊"}}
 	for _, tc := range []struct {
 		keys string
 		ids  []string
@@ -213,7 +213,7 @@ func TestSearchReverseCycling(t *testing.T) {
 }
 
 func TestSearchShiftTabFragmentedInput(t *testing.T) {
-	sessions := []SearchSession{{"a", "alpha"}, {"b", "beta"}}
+	sessions := []SearchSession{{ID: "a", Name: "alpha"}, {ID: "b", Name: "beta"}}
 	for split := 1; split < 3; split++ {
 		t.Run(string(rune('0'+split)), func(t *testing.T) {
 			clk := clock.NewMock()

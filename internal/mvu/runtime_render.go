@@ -10,6 +10,7 @@ import (
 // RuntimeHostFrameInput is one runtime-backed host render request.
 type RuntimeHostFrameInput struct {
 	Snapshot     *protocolpb.Snapshot
+	Popup        *Popup
 	Cols         int
 	Rows         int
 	Cursor       Cursor
@@ -37,6 +38,7 @@ func (r *Runtime) RenderHostFrame(in RuntimeHostFrameInput) (RuntimeHostFrameOut
 		now = r.now()
 	}
 	state := r.State()
+	state.Popup = in.Popup
 	renderState, resolveOpts, tabDelay := r.PrepareRenderState(state, in.Cursor, now, RenderStateOptions{
 		SuppressTabs: in.SuppressTabs,
 	})
@@ -72,6 +74,7 @@ func (r *Runtime) RenderHostFrame(in RuntimeHostFrameInput) (RuntimeHostFrameOut
 // RuntimeAttachFrameInput is one runtime-backed attach render request.
 type RuntimeAttachFrameInput struct {
 	Snapshot          *protocolpb.Snapshot
+	Popup             *Popup
 	Cols              int
 	Rows              int
 	Cursor            Cursor
@@ -101,6 +104,7 @@ func (r *Runtime) RenderAttachFrame(in RuntimeAttachFrameInput) (RuntimeAttachFr
 		now = r.now()
 	}
 	state := r.State()
+	state.Popup = in.Popup
 	renderState, resolveOpts, tabDelay := r.PrepareRenderState(state, in.Cursor, now, RenderStateOptions{
 		SuppressTabs:     in.SuppressTabs,
 		ForceTabsVisible: in.ForceTabsVisible,

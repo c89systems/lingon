@@ -59,3 +59,25 @@ func TestStoreWithLockPersistsUpdates(t *testing.T) {
 		t.Fatalf("PID = %d, want 1234", rec.PID)
 	}
 }
+
+func TestStoreNormalizesDisplayNamesWithoutChangingIdentity(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if err := store.WithLock(func(state *State) error {
+		state.Sessions["stable"] = SessionRecord{SessionID: "stable", Name: "build server", SocketPath: "stable.sock"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := state.Sessions["stable"]
+	if rec.Name != "build_server" || rec.SessionID != "stable" || rec.SocketPath != "stable.sock" {
+		t.Fatalf("%+v", rec)
+	}
+	old := normalizeState(&State{Sessions: map[string]SessionRecord{"existing": {SessionID: "existing", Name: "old name"}}})
+	if old.Sessions["existing"].Name != "old_name" {
+		t.Fatal("loaded metadata retained spaces")
+	}
+}

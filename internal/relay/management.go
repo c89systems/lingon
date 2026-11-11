@@ -40,6 +40,9 @@ func (s *HTTPServer) handleSessionManagement(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, sessionmanage.Result{Error: "invalid request"})
 		return
 	}
+	if req.Kind == "rename" {
+		req.Name = sessionmanage.NormalizeName(req.Name)
+	}
 	if err := sessionmanage.Validate(req); err != nil {
 		writeJSON(w, http.StatusBadRequest, sessionmanage.Result{Error: err.Error()})
 		return
@@ -76,19 +79,20 @@ func (h *Hub) manage(ctx context.Context, req sessionmanage.Request) (sessionman
 	h.management[key] = waiter
 	h.mu.Unlock()
 	defer func() { h.mu.Lock(); delete(h.management, key); h.mu.Unlock() }()
-	frame := &protocolpb.Frame{SessionId: req.SessionID, Payload: &protocolpb.Frame_Management{Management: &protocolpb.SessionManagement{CorrelationId: key, RequestId: req.RequestID, Kind: req.Kind, Name: req.Name}}}
+	frame := &protocolpb.Frame{SessionId: req.SessionID, Payload: &protocolpb.Frame_Management{Management: &protocolpb.SessionManagement{CorrelationId: key, RequestId: req.RequestID, Kind: req.Kind, Name: req.Name, Path: req.Path, Cols: uint32(req.Cols), Rows: uint32(req.Rows)}}}
 	if err := host.Send(ctx, frame); err != nil {
 		return sessionmanage.Result{}, err
 	}
 	select {
 	case reply := <-waiter.reply:
-		return sessionmanage.Result{SessionID: reply.ResultSessionId, Name: reply.Name, Error: reply.Error}, nil
+		return sessionmanage.Result{SessionID: reply.ResultSessionId, Name: reply.Name, Path: reply.Path, Directories: reply.Directories, Error: reply.Error}, nil
 	case <-ctx.Done():
 		return sessionmanage.Result{}, fmt.Errorf("session operation outcome unknown; refresh sessions before retrying: %w", ctx.Err())
 	}
 }
 
 func (s *HTTPServer) handleManagementResult(_ context.Context, host connection, reply *protocolpb.SessionManagement) {
+	reply.Name = sessionmanage.NormalizeName(reply.Name)
 	if !reply.Completed {
 		return
 	}

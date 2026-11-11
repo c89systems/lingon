@@ -70,7 +70,7 @@ func TestSessionManagementChildCredentialsStayOutOfProcessMetadata(t *testing.T)
 			if err != nil || result.Error != "" {
 				t.Fatalf("child management failed: %v %s", err, result.Error)
 			}
-			if _, err := waitForSessionName(t, h.Clock(), h.Endpoint(), h.AccessToken(), "Credential child", 8*time.Second); err != nil {
+			if _, err := waitForSessionName(t, h.Clock(), h.Endpoint(), h.AccessToken(), "Credential_child", 8*time.Second); err != nil {
 				t.Fatal(err)
 			}
 		})

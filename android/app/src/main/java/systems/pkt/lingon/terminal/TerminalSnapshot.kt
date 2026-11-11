@@ -22,6 +22,7 @@ class TerminalSnapshot(
     var cursorVisible: Boolean,
     var mode: Int,
     var title: String,
+    var hyperlinks: Array<String>? = null,
 ) {
     internal fun isWideContinuation(row: Int, col: Int): Boolean {
         if (row !in 0 until rows || col !in 1 until cols) return false
@@ -61,6 +62,10 @@ class TerminalSnapshot(
                 }
             }
 
+            val hyperlinks = if (snapshot.hyperlinksCount > 0) {
+                Array(cellCount) { snapshot.hyperlinksList.getOrElse(it) { "" } }
+            } else null
+
             val cursor = snapshot.cursor ?: Cursor.getDefaultInstance()
             return TerminalSnapshot(
                 cols = cols,
@@ -70,6 +75,7 @@ class TerminalSnapshot(
                 fg = fg,
                 bg = bg,
                 graphemes = graphemes,
+                hyperlinks = hyperlinks,
                 cursorX = cursor.x,
                 cursorY = cursor.y,
                 cursorVisible = snapshot.cursorVisible,
@@ -110,6 +116,7 @@ class TerminalSnapshot(
                         fg = snapshot.fg,
                         bg = snapshot.bg,
                         graphemes = expanded,
+                        hyperlinks = snapshot.hyperlinks,
                         cursorX = snapshot.cursorX,
                         cursorY = snapshot.cursorY,
                         cursorVisible = snapshot.cursorVisible,
@@ -121,6 +128,9 @@ class TerminalSnapshot(
                 }
             }
 
+            if (current.hyperlinks == null && diff.diffRowsList.any { it.hyperlinksCount > 0 }) {
+                current.hyperlinks = Array(cellCount) { "" }
+            }
             for (row in diff.diffRowsList) {
                 applyRow(current, row)
             }
@@ -156,6 +166,7 @@ class TerminalSnapshot(
             val graphemeList = row.graphemesList
             for (x in 0 until snapshot.cols) {
                 val idx = start + x
+                snapshot.hyperlinks?.set(idx, row.hyperlinksList.getOrElse(x) { "" })
                 if (x < runesList.size) snapshot.runes[idx] = runesList[x]
                 if (x < modesList.size) snapshot.modes[idx] = modesList[x]
                 if (x < fgList.size) snapshot.fg[idx] = fgList[x]

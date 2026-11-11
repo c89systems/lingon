@@ -38,6 +38,7 @@ import (
 	"pkt.systems/lingon/internal/relayclient"
 	"pkt.systems/lingon/internal/render"
 	"pkt.systems/lingon/internal/retryafter"
+	"pkt.systems/lingon/internal/sessionmanage"
 	"pkt.systems/lingon/internal/terminal"
 	"pkt.systems/lingon/internal/theme"
 	"pkt.systems/lingon/internal/tlsmgr"
@@ -62,6 +63,9 @@ type Client struct {
 	RequestControl bool
 	// Restore requests that the local terminal follow remote viewport dimensions.
 	Restore bool
+	// WindowRestore shares physical-window restoration with an embedding host.
+	// When supplied, its mode takes precedence over Restore.
+	WindowRestore *terminal.WindowRestore
 	// Cols and Rows size the initial viewport before Restore follows session sizes.
 	Cols, Rows   int
 	HostnameOnly bool
@@ -107,8 +111,6 @@ type Client struct {
 	holderID string
 
 	mu                        sync.RWMutex
-	restoreMode               *atomic.Bool
-	restoreWindow             *restoreWindow
 	restoreOnce               sync.Once
 	geometry                  *clientGeometry
 	restoreRequest            restoreRequest // protected by renderMu
@@ -149,6 +151,7 @@ type Client struct {
 	readErr                   error
 	controlCh                 chan struct{}
 	ws                        *websocket.Conn
+	compositorMu              sync.Mutex
 	compositor                *mvu.Runtime
 	effectsMu                 sync.RWMutex
 	runCtx                    context.Context
@@ -167,6 +170,12 @@ type Client struct {
 	themeName                 string
 
 	OnReady func()
+	// TextClipboard is shared by tabs in the owning interactive Lingon process.
+	TextClipboard *control.TextClipboard
+	// Popup provides an immutable UI-local popup layer for this tab.
+	Popup        func() *mvu.Popup
+	embedded     func() bool
+	embeddedView func(*protocolpb.Snapshot) bool
 	// OnControllerAcquired is invoked when this client becomes the active controller.
 	OnControllerAcquired func()
 	// OnFrame is invoked for each frame received from the server.
@@ -348,7 +357,7 @@ func (c *Client) run(ctx context.Context, opts runOptions) error {
 	} else if c.ShareToken == "" {
 		if c.TokenRefresher != nil {
 			if _, err := c.refreshToken(ctx); err != nil {
-				return authExpiredError(c.Endpoint, err)
+				return authRefreshError(c.Endpoint, err)
 			}
 		}
 		if c.accessToken() == "" {
@@ -530,6 +539,8 @@ func (c *Client) clock() clock.Clock {
 }
 
 func (c *Client) ensureCompositor() *mvu.Runtime {
+	c.compositorMu.Lock()
+	defer c.compositorMu.Unlock()
 	if c.compositor != nil {
 		return c.compositor
 	}
@@ -560,7 +571,7 @@ func (c *Client) dialWithRefresh(ctx context.Context, url string, opts *websocke
 		ws, resp, err := websocket.Dial(ctx, url, opts)
 		if err != nil {
 			if resp != nil && resp.StatusCode == http.StatusUnauthorized {
-				if attempt == 0 && c.ShareToken == "" {
+				if attempt == 0 && c.ShareToken == "" && c.TokenRefresher != nil {
 					if _, refreshErr := c.refreshToken(ctx); refreshErr == nil {
 						if resp.Body != nil {
 							_ = resp.Body.Close()
@@ -571,7 +582,7 @@ func (c *Client) dialWithRefresh(ctx context.Context, url string, opts *websocke
 						if resp.Body != nil {
 							_ = resp.Body.Close()
 						}
-						return nil, authExpiredError(c.Endpoint, refreshErr)
+						return nil, authRefreshError(c.Endpoint, refreshErr)
 					}
 				}
 				msg := authErrorMessage(resp)
@@ -623,6 +634,18 @@ func (c *Client) refreshToken(ctx context.Context) (string, error) {
 	}
 	c.SetAccessToken(token)
 	return token, nil
+}
+
+// Only definitive credential failures may cancel the owner's attach UI. A
+// refresh endpoint outage says nothing about the validity of live connections.
+func authRefreshError(endpoint string, err error) error {
+	if errors.Is(err, ErrAuthExpired) {
+		return err
+	}
+	if errors.Is(err, relayclient.ErrCredentialsRejected) {
+		return authExpiredError(endpoint, err)
+	}
+	return fmt.Errorf("authentication refresh failed: %w", err)
 }
 
 func authExpiredError(endpoint string, err error) error {
@@ -736,7 +759,11 @@ func (c *Client) SetStdout(w io.Writer) {
 // SetCompositor shares an owner-managed overlay compositor for rendering.
 // A nil compositor creates a client-owned runtime with this client's context.
 func (c *Client) SetCompositor(ui *mvu.Runtime) {
+	c.renderMu.Lock()
+	defer c.renderMu.Unlock()
+	c.compositorMu.Lock()
 	c.compositor = ui
+	c.compositorMu.Unlock()
 	if ui == nil {
 		c.ensureCompositor()
 	}
@@ -919,8 +946,8 @@ func (c *Client) SuppressTabsUntilCursorLeavesTopRow() {
 	c.RenderCurrent()
 }
 
-// ForceTabsVisibleOnce forces the next active-view render passes to keep the tab
-// bar visible even if the cursor is currently on row 1.
+// ForceTabsVisibleOnce requests a short tab preview for active-view renders.
+// Cursor auto-hide and newly received terminal frames take precedence.
 func (c *Client) ForceTabsVisibleOnce() {
 	atomic.StoreUint32(&c.forceTabsVisible, 2)
 }
@@ -1167,7 +1194,7 @@ func (c *Client) syncScrollbackLocked() {
 	if rows <= 0 {
 		rows = int(snap.Rows)
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.scrollbackView.SyncSource(mvu.ScrollbackSource{Position: c.scrollbackBuffer.Position(), HistoryRows: c.scrollbackBuffer.Len(), LiveRows: int(snap.Rows), ViewRows: rows})
 	c.scrollbackView.Normalize(c.scrollbackBuffer.Len()+int(snap.Rows), rows, protoScrollbackContentWidth(c.scrollbackBuffer.Rows(), snap), cols)
 }
 
@@ -1194,7 +1221,9 @@ func shiftScrollbackLive(snap *protocolpb.Snapshot, rows int) *protocolpb.Snapsh
 	shiftScrollbackCells(next.Modes, count)
 	shiftScrollbackCells(next.Fg, count)
 	shiftScrollbackCells(next.Bg, count)
+	shiftScrollbackCells(next.UnderlineColor, count)
 	shiftScrollbackCells(next.Graphemes, count)
+	shiftScrollbackCells(next.Hyperlinks, count)
 	return next
 }
 
@@ -1232,7 +1261,7 @@ func (c *Client) setScrollbackActive(active bool) {
 	colOffset, liveOriginRow := render.ViewportOriginForSnapshot(snap, viewCols, viewRows)
 	rowOffset := max(0, int(snap.Rows)-viewRows-liveOriginRow) + c.scrollbackPending
 	c.scrollbackView.EnterAt(totalRows, viewRows, rowOffset, contentCols, viewCols, colOffset)
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.setScrollbackMouseActive(true)
 }
 
@@ -1244,7 +1273,7 @@ func (c *Client) setScrollbackMouseActive(active bool) {
 }
 
 func (c *Client) scrollbackPage(delta int, stepRows int) bool {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	viewRows := c.scrollbackViewRows()
@@ -1255,13 +1284,13 @@ func (c *Client) scrollbackPage(delta int, stepRows int) bool {
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, viewRows, protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	return c.scrollbackView.Page(totalRows, viewRows, delta, stepRows)
 }
 
 func (c *Client) scrollbackPanX(delta int) bool {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	totalRows := snapshotRows
@@ -1271,7 +1300,7 @@ func (c *Client) scrollbackPanX(delta int) bool {
 	viewRows := c.scrollbackViewRows()
 	viewCols := c.scrollbackViewCols()
 	contentCols := protoScrollbackContentWidthLocked(c)
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	return c.scrollbackView.PanX(contentCols, viewCols, delta)
 }
@@ -1324,6 +1353,9 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.scrollbackMu.Lock()
 	c.mu.Lock()
 	c.lastSnapshot = snap
+	// A new terminal frame supersedes the cached-view tab-switch preview.
+	// Its cursor must drive auto-hide even if a preview render is still pending.
+	atomic.StoreUint32(&c.forceTabsVisible, 0)
 	if seq != 0 {
 		c.lastSeq = seq
 	}
@@ -1332,7 +1364,7 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.forceFreshHello = false
 	c.mu.Unlock()
 	if c.scrollbackReplacement != nil {
-		c.scrollbackBuffer.Apply(&protocolpb.Scrollback{Clear: true, Cols: snap.Cols, Rows: c.scrollbackReplacement.Rows()})
+		c.scrollbackBuffer.Replace(c.scrollbackReplacement)
 		c.scrollbackReplacement = nil
 	}
 	c.updateScrollbackSnapshotLocked()
@@ -1340,7 +1372,13 @@ func (c *Client) handleSnapshot(seq uint64, snap *protocolpb.Snapshot) {
 	c.scrollbackMu.Unlock()
 	if !visible {
 		c.renderMu.Lock()
-		c.renderCache.Reset()
+		// Input can enter scrollback while this frame waits for a writer.
+		// Recheck under the render lock before discarding its stable baseline.
+		c.scrollbackMu.RLock()
+		if !c.scrollbackView.Visible() {
+			c.renderCache.Reset()
+		}
+		c.scrollbackMu.RUnlock()
 		c.renderMu.Unlock()
 	}
 	c.requestRenderCurrent()
@@ -1391,13 +1429,14 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 			}
 		}
 		c.lastSnapshot = &protocolpb.Snapshot{
-			Cols:      uint32(cols),
-			Rows:      uint32(rows),
-			Runes:     make([]uint32, cols*rows),
-			Modes:     make([]int32, cols*rows),
-			Fg:        make([]uint32, cols*rows),
-			Bg:        make([]uint32, cols*rows),
-			Graphemes: nil,
+			Cols:           uint32(cols),
+			Rows:           uint32(rows),
+			Runes:          make([]uint32, cols*rows),
+			Modes:          make([]int32, cols*rows),
+			Fg:             make([]uint32, cols*rows),
+			UnderlineColor: make([]uint32, cols*rows),
+			Bg:             make([]uint32, cols*rows),
+			Graphemes:      nil,
 		}
 		if hasGraphemes {
 			c.lastSnapshot.Graphemes = make([]string, cols*rows)
@@ -1405,6 +1444,17 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 	}
 
 	snap := c.lastSnapshot
+	if len(snap.Hyperlinks) == 0 {
+		for _, row := range diff.DiffRows {
+			if len(row.Hyperlinks) > 0 {
+				snap.Hyperlinks = make([]string, cols*rows)
+				break
+			}
+		}
+	}
+	if len(snap.UnderlineColor) == 0 {
+		snap.UnderlineColor = make([]uint32, cols*rows)
+	}
 	if len(snap.Graphemes) == 0 {
 		for _, row := range diff.DiffRows {
 			if len(row.Graphemes) > 0 {
@@ -1433,6 +1483,17 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 			if x < len(row.Bg) {
 				snap.Bg[idx] = row.Bg[x]
 			}
+			if len(snap.Hyperlinks) > 0 {
+				snap.Hyperlinks[idx] = ""
+				if x < len(row.Hyperlinks) {
+					snap.Hyperlinks[idx] = row.Hyperlinks[x]
+				}
+			}
+			if x < len(row.UnderlineColor) {
+				snap.UnderlineColor[idx] = row.UnderlineColor[x]
+			} else {
+				snap.UnderlineColor[idx] = terminal.ColorDefault
+			}
 			if len(snap.Graphemes) > 0 && x < len(row.Graphemes) {
 				snap.Graphemes[idx] = row.Graphemes[x]
 			}
@@ -1444,6 +1505,7 @@ func (c *Client) applyDiff(diff *protocolpb.Diff) *protocolpb.Snapshot {
 	snap.CursorVisible = diff.CursorVisible
 	snap.Mode = diff.Mode
 	snap.Title = diff.Title
+	atomic.StoreUint32(&c.forceTabsVisible, 0)
 	return snap
 }
 
@@ -1472,6 +1534,8 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 		scrollRows = c.scrollbackBuffer.Rows()
 	}
 	totalRows := len(scrollRows) + int(snap.Rows)
+	copyView := c.scrollbackView
+	copySource := mvu.ScrollbackSource{Position: c.scrollbackBuffer.Position(), HistoryRows: len(scrollRows), LiveRows: int(snap.Rows), ViewRows: rows}
 	scrollOffset := c.scrollbackView.OffsetFor(c.scrollbackBuffer.Position())
 	scrollCol := c.scrollbackView.Column()
 	scrollActive := c.scrollbackView.Active()
@@ -1481,6 +1545,10 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	viewSnap := snap
 	if scrollActive || scrollOffset > 0 {
 		viewSnap = mvu.BuildScrollbackViewFromProto(cols, rows, scrollRows, snap, scrollOffset, scrollCol)
+		viewSnap = copyView.DecorateCopy(viewSnap, copySource)
+	}
+	if c.embeddedView != nil && c.embeddedView(viewSnap) {
+		return
 	}
 	compositor := c.ensureCompositor()
 	if c.stdoutWriter() != io.Discard {
@@ -1499,6 +1567,10 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	col := cursor.Col
 	visible := cursor.Visible
 	suppressed := c.tabSuppress.Resolve(cursor.Row)
+	// Cached tab switches must respect a cursor already occupying row 1 too.
+	if cursor.Row <= 1 {
+		atomic.StoreUint32(&c.forceTabsVisible, 0)
+	}
 	forceTabsVisible := false
 	for {
 		n := atomic.LoadUint32(&c.forceTabsVisible)
@@ -1512,6 +1584,7 @@ func (c *Client) renderSnapshotLocked(snap *protocolpb.Snapshot) {
 	}
 	frame, err := compositor.RenderAttachFrame(mvu.RuntimeAttachFrameInput{
 		Snapshot:          viewSnap,
+		Popup:             c.popupFrame(),
 		Cols:              cols,
 		Rows:              rows,
 		Cursor:            cursor,
@@ -1673,7 +1746,7 @@ func (c *Client) ScrollbackPanX(delta int) bool {
 
 // ScrollbackTop jumps to the start of the scrollback buffer.
 func (c *Client) ScrollbackTop(viewRows int) {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	totalRows := snapshotRows
@@ -1685,21 +1758,21 @@ func (c *Client) ScrollbackTop(viewRows int) {
 	if viewRows <= 0 {
 		viewRows = c.scrollbackViewRows()
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, viewRows, contentCols, viewCols)
 	c.scrollbackView.Top(totalRows, viewRows)
 }
 
 // ScrollbackBottom jumps back to the live view position.
 func (c *Client) ScrollbackBottom() {
-	snapshotRows := c.renderSnapshotRows()
+	snapshotRows := c.scrollbackSnapshotRows()
 	c.scrollbackMu.Lock()
 	defer c.scrollbackMu.Unlock()
 	totalRows := snapshotRows
 	if c.scrollbackBuffer != nil {
 		totalRows += c.scrollbackBuffer.Len()
 	}
-	c.scrollbackView.SyncHistory(c.scrollbackBuffer.Position())
+	c.syncCopySourceLocked()
 	c.scrollbackView.Normalize(totalRows, c.scrollbackViewRows(), protoScrollbackContentWidthLocked(c), c.scrollbackViewCols())
 	c.scrollbackView.Bottom()
 }
@@ -2048,6 +2121,7 @@ func (c *Client) handleRoutedHeadlessStatus(wall *protocolpb.Wall) bool {
 	switch wall.GetSender() {
 	case headless.RoutedStatusSenderConnected:
 		input.Kind = mvu.StatusConnected
+		input.Message = mvu.ConnectedMessage
 		timeout := wallTimeout(wall)
 		if timeout <= 0 {
 			timeout = 3 * time.Second
@@ -2229,6 +2303,14 @@ func (c *Client) helpVisible() bool {
 	return c.renderHelpVisible()
 }
 
+// Navigation counts the source grid, not the parent's composed framebuffer.
+// Embedded popup views do not populate a standalone render cache.
+func (c *Client) scrollbackSnapshotRows() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return int(c.lastSnapshot.GetRows())
+}
+
 func (c *Client) renderSnapshotRows() int {
 	c.renderMu.Lock()
 	defer c.renderMu.Unlock()
@@ -2359,7 +2441,10 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 	buf := make([]byte, 1024)
 	prefill := make([]byte, 0, 1024)
 	var prefix control.Prefix
+	var folder control.DirectoryPrompt
+	defer folder.Close()
 	var search control.SearchPrompt
+	var searchImportant atomic.Bool
 	defer search.Close()
 	searchSessions := func() []control.SearchSession {
 		name := c.SessionID
@@ -2367,7 +2452,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		if state.ActiveTab >= 0 && state.ActiveTab < len(state.Tabs) {
 			name = state.Tabs[state.ActiveTab].Title
 		}
-		return []control.SearchSession{{ID: c.SessionID, Name: name}}
+		return []control.SearchSession{{ID: c.SessionID, Name: name, Excluded: searchImportant.Load() && state.ImportantTabs.Active() && !state.ImportantTabs.Contains(c.SessionID), Marked: state.ImportantTabs.Contains(c.SessionID)}}
 	}
 	// Serialize timer and input redraws so an older view cannot hide a new search.
 	var searchRenderMu sync.Mutex
@@ -2379,7 +2464,7 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 		}
 		items := searchSessions()
 		view := search.View(items)
-		c.renderSearch(mvu.SearchState{Visible: view.Active, Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
+		c.renderSearch(mvu.SearchState{Visible: view.Active, Important: view.Important, Label: view.Label(searchImportant.Load()), Text: view.Text, Ghost: view.Ghost, CandidateID: view.CandidateID})
 	}
 	pending := make([]byte, 0, 2048)
 	var scrollState scrollInputState
@@ -2421,8 +2506,14 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 			return true
 		}
 		processNormalByte := func(b byte) bool {
+			if folder.HandlesInput() && folder.Feed(b) {
+				return true
+			}
 			if search.HandlesInput() {
 				result := search.Feed(b, searchSessions())
+				if len(result.SessionIDs) > 0 {
+					c.applyCompositorAction(mvu.ImportantTabsAction{SessionIDs: result.SessionIDs})
+				}
 				if result.Changed {
 					showSearch()
 				}
@@ -2453,7 +2544,25 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return false
 				}
 				switch action {
-				case control.ActionSearch:
+				case control.ActionResetImportant:
+					c.applyCompositorAction(mvu.ImportantTabsAction{Reset: true})
+					c.renderCurrent()
+					return true
+				case control.ActionDirectory:
+					folder.Begin(ctx, control.DirectoryPromptOptions{SessionID: c.SessionID, Caller: c, Clock: c.clock(), OnChange: func(view control.DirectoryView) {
+						if ctx.Err() != nil {
+							return
+						}
+						c.renderSearch(mvu.SearchState{Visible: view.Active, Label: control.DirectoryLabel, Text: view.Text, Ghost: view.Ghost, Hint: view.Hint})
+					}})
+					return true
+				case control.ActionToggleImportant:
+					searchImportant.Store(false)
+					search.BeginImportant(c.clock(), showSearch, c.SessionID, searchSessions())
+					showSearch()
+					return true
+				case control.ActionSearch, control.ActionSearchImportant:
+					searchImportant.Store(action == control.ActionSearchImportant)
 					search.Begin(c.clock(), showSearch, c.SessionID)
 					showSearch()
 					return true
@@ -2484,7 +2593,23 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					return true
 				}
 				switch action {
+				case control.ActionPasteText:
+					if err := c.SendTextPaste(ctx, c.textClipboard().Text()); err != nil {
+						c.showInfoStatus("Paste: " + err.Error())
+					}
+					return true
 				case control.ActionQuit:
+					go func() {
+						_, err := c.Manage(ctx, sessionmanage.Request{RequestID: c.newClientID(), SessionID: c.SessionID, Kind: "close"})
+						if err != nil {
+							c.showStatusBanner(mvu.StatusInput{Kind: mvu.StatusError, Message: err.Error(), Duration: 5 * time.Second})
+						}
+					}()
+					return true
+				case control.ActionSSHDisconnect:
+					pending = append(pending, '\r', '~', '.')
+					return flushPending()
+				case control.ActionDetach:
 					_ = ws.Close(websocket.StatusNormalClosure, "detached")
 					return false
 				case control.ActionSendCtrlD:
@@ -2577,6 +2702,9 @@ func (c *Client) readInput(ctx context.Context, ws *websocket.Conn) {
 					}
 					changed := false
 					switch cmd {
+					case scrollVisual, scrollSelect, scrollCopy:
+						c.ScrollbackCopy(b)
+						changed = true
 					case scrollPageUp:
 						changed = c.scrollbackPage(1, half)
 					case scrollPageDown:

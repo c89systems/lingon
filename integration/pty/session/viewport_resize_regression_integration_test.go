@@ -2408,10 +2408,10 @@ func requireViewportResizeTabRow(screen ptytest.Screen, tokens ...string) error 
 }
 
 func normalizeViewportResizeTabRow(line string, titles ...string) string {
-	const banner = "connected to "
 	prefix := line
 	suffix := ""
-	if idx := strings.Index(line, banner); idx >= 0 {
+	if hasConnectedBanner(line) {
+		idx := strings.LastIndex(line, "connected")
 		prefix = line[:idx]
 		suffix = line[idx:]
 	}

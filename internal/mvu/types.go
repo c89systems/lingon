@@ -21,6 +21,7 @@ type State struct {
 
 	HelpVisible bool
 	Search      SearchState
+	Popup       *Popup
 
 	ConnectionMessage   string
 	ConnectionStyle     BannerStyle
@@ -42,6 +43,7 @@ type State struct {
 	ScrollbackMessage string
 
 	Tabs            []Tab
+	ImportantTabs   ImportantTabs
 	ActiveTab       int
 	TabBarVisible   bool
 	TabBarShownAt   time.Time

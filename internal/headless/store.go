@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"pkt.systems/lingon/internal/sessionmanage"
 )
 
 const stateVersion = 1
@@ -164,6 +166,10 @@ func normalizeState(state *State) *State {
 	}
 	if state.Watchers == nil {
 		state.Watchers = map[string]WatcherRecord{}
+	}
+	for id, record := range state.Sessions {
+		record.Name = sessionmanage.NormalizeName(record.Name)
+		state.Sessions[id] = record
 	}
 	return state
 }

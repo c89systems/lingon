@@ -62,6 +62,9 @@ func newClientGeometry(cols, rows, localCols, localRows int, restore bool) (*cli
 }
 
 func (c *Client) geometrySize(cols, rows int) (int, int) {
+	if c.isEmbedded() {
+		return cols, rows
+	}
 	if c.geometry == nil || c.geometry.restoreSeed != nil {
 		return cols, rows
 	}
@@ -70,6 +73,9 @@ func (c *Client) geometrySize(cols, rows int) (int, int) {
 }
 
 func (c *Client) applyGeometry(ctx context.Context) error {
+	if c.isEmbedded() {
+		return nil
+	}
 	if c.geometry == nil {
 		return nil
 	}

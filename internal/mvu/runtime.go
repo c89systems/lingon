@@ -119,6 +119,14 @@ func topStatusStable(prev FrameState, resolved Resolved) bool {
 // RenderHost executes the host MVU update+view pipeline for one frame.
 func RenderHost(in HostRenderInput) (HostRenderOutput, error) {
 	out := HostRenderOutput{}
+	if in.State.Popup != nil {
+		var err error
+		in.Snapshot, err = composePopup(in.Snapshot, in.Cols, in.Rows, in.State)
+		if err != nil {
+			return out, err
+		}
+		in.Cursor = CursorFromSnapshot(in.Snapshot, in.Cols, in.Rows)
+	}
 	model := NewModel(in.State, in.Cursor, in.Now, in.Resolve)
 	resolved := model.ResolveState()
 	tabSig := uint64(0)
@@ -194,6 +202,14 @@ func RenderHost(in HostRenderInput) (HostRenderOutput, error) {
 // RenderAttach executes the attach MVU update+view pipeline for one frame.
 func RenderAttach(in AttachRenderInput) (AttachRenderOutput, error) {
 	out := AttachRenderOutput{}
+	if in.State.Popup != nil {
+		var err error
+		in.Snapshot, err = composePopup(in.Snapshot, in.Cols, in.Rows, in.State)
+		if err != nil {
+			return out, err
+		}
+		in.Cursor = CursorFromSnapshot(in.Snapshot, in.Cols, in.Rows)
+	}
 	model := NewModel(in.State, in.Cursor, in.Now, in.Resolve)
 	resolved := model.ResolveState()
 	tabSig := uint64(0)

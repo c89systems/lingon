@@ -5,12 +5,13 @@ import (
 	"time"
 )
 
-func TestConnectedToMessage(t *testing.T) {
-	if got := ConnectedToMessage("https://localhost:1234/v1"); got != "connected to https://localhost:1234/v1" {
-		t.Fatalf("ConnectedToMessage(endpoint) = %q", got)
-	}
-	if got := ConnectedToMessage(""); got != "connected" {
-		t.Fatalf("ConnectedToMessage(empty) = %q", got)
+func TestConnectedStatusOmitsEndpoint(t *testing.T) {
+	for _, endpoint := range []string{"https://localhost:1234/v1", "localhost", "", "  "} {
+		rt := NewRuntime()
+		got := rt.ApplyAction(StatusAction{Input: StatusInput{Kind: StatusConnected, Endpoint: endpoint}})
+		if got.State.ConnectionMessage != "connected" {
+			t.Fatalf("endpoint=%q: connected status = %q", endpoint, got.State.ConnectionMessage)
+		}
 	}
 }
 

@@ -115,7 +115,7 @@ func TestMultiAttachRespondsToKeysWhileOffline(t *testing.T) {
 			if screen.Contains("offline-test") && strings.Contains(screen.String(), "^Lh") {
 				return nil
 			}
-			if screen.Contains("session: "+sessionID) && screen.Contains("Ctrl+L h  help") {
+			if screen.Contains("Copyright (C) 2026 C89 Systems AB") && screen.Contains("Ctrl+L h  help") {
 				return nil
 			}
 			return fmt.Errorf("help overlay missing for %s; screen:\n%s", sessionID, screen.String())

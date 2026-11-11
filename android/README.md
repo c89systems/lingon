@@ -28,11 +28,27 @@ rendering pipeline.
   including emoji and supplementary characters, while FN remains enabled.
 - Entering FN also enables text selection. Drag one finger over terminal cells
   to select; selected cells have a white background. Drag two fingers to pan or pinch to
-  zoom while selection is active. Tap the terminal to show the keyboard again.
+  zoom while selection is active. Hold the dragging finger near any edge to
+  scroll and extend the selection beyond the viewport, including into older
+  scrollback. Two-finger holds, pans and pinches preserve the selected range;
+  lifting either finger does not start a new selection. Loaded history stays
+  available while selected text may be offscreen. Tap the terminal to show the
+  keyboard again.
   Leaving FN clears the selection.
 - FN+C copies the selected text to Android's clipboard. FN+V pastes the current
   Android clipboard contents into the active terminal, including after switching
   sessions.
+
+When history and live terminal rows are visible together, a subtle dashed line
+marks their boundary. It occupies the final pixel row of history, stays one
+screen pixel thick at every zoom level, and does not change terminal row height.
+
+## Terminal links
+
+Tap an OSC 8 link label to open its transmitted HTTP or HTTPS target in Android's
+link handler. Targets survive terminal updates, tab reopening and scrollback;
+ordinary underlining does not create a link. Visible HTTPS URLs remain tappable.
+Both the publishing host/`lingonx` and the app need a build with OSC 8 support.
 
 ## Prereqs
 

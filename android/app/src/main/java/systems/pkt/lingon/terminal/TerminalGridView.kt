@@ -10,9 +10,11 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowInsets
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.ColorUtils
 import androidx.compose.ui.graphics.toArgb
 import systems.pkt.lingon.R
 import systems.pkt.lingon.DefaultTerminalZoom
@@ -20,6 +22,8 @@ import systems.pkt.lingon.MaxTerminalRenderFontSizeSp
 import systems.pkt.lingon.MaxTerminalZoom
 import systems.pkt.lingon.MinTerminalFontSizeSp
 import systems.pkt.lingon.MinTerminalZoom
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -65,6 +69,18 @@ class TerminalGridView @JvmOverloads constructor(
     private var selectionBeforeTouch: TerminalSelection? = null
     private var selectionDragActive: Boolean = false
     private var selectionMoved: Boolean = false
+    private var selectionMultiTouch: Boolean = false
+    private var selectionTouchAnchor: TerminalCell? = null
+    private var selectionDownX = 0f
+    private var selectionDownY = 0f
+    private val selectionTouchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    internal var selectionScrollDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate
+        set(value) {
+            selectionAutoScroll.stop()
+            field = value
+            selectionAutoScroll = TerminalSelectionAutoScroll(value, ::scrollSelectionAtEdge)
+        }
+    private var selectionAutoScroll = TerminalSelectionAutoScroll(selectionScrollDispatcher, ::scrollSelectionAtEdge)
     private var lastTouchX: Float = 0f
     private var lastTouchY: Float = 0f
     private var onViewSizeChanged: ((Int, Int) -> Unit)? = null
@@ -197,6 +213,11 @@ class TerminalGridView @JvmOverloads constructor(
         hasBeenAttachedToWindow = true
     }
 
+    override fun onDetachedFromWindow() {
+        resetSelectionGesture()
+        super.onDetachedFromWindow()
+    }
+
     fun update(
         snapshot: TerminalSnapshot?,
         fontSizeSp: Int,
@@ -218,8 +239,19 @@ class TerminalGridView @JvmOverloads constructor(
         var snapshotChanged = false
         var frameSeqChanged = false
         if (this.snapshot !== snapshot) {
-            if (snapshot == null || this.snapshot?.cols != snapshot.cols || this.snapshot?.rows != snapshot.rows) {
+            val previous = this.snapshot
+            val historyDelta = scrollbackOffsetRows - this.scrollbackOffsetRows
+            val historyResize = previous != null && snapshot != null && previous.cols == snapshot.cols &&
+                snapshot.rows - previous.rows == historyDelta
+            if (previous == null || snapshot == null || previous.cols != snapshot.cols || (!historyResize && previous.rows != snapshot.rows)) {
                 selection = null
+                if (selectionMode) resetSelectionGesture()
+            } else if (historyDelta != 0) {
+                val hadSelection = selection != null
+                selection = selection?.shiftedRows(historyDelta, snapshot.rows)
+                selectionBeforeTouch = selectionBeforeTouch?.shiftedRows(historyDelta, snapshot.rows)
+                selectionTouchAnchor = selectionTouchAnchor?.shiftedRows(historyDelta, snapshot.rows)
+                if (hadSelection && selection == null) resetSelectionGesture()
             }
             this.snapshot = snapshot
             snapshotChanged = true
@@ -315,6 +347,8 @@ class TerminalGridView @JvmOverloads constructor(
             updateLayout()
             applyPendingViewportRestoreIfReady()
             applyCameraMode()
+            if (selectionDragActive && selectionMoved) updateSelectionFocus()
+            updateSelectionAutoScroll()
             invalidate()
         }
     }
@@ -342,11 +376,10 @@ class TerminalGridView @JvmOverloads constructor(
     fun setSelectionMode(enabled: Boolean) {
         if (selectionMode == enabled) return
         selectionMode = enabled
+        // One-finger drags select in FN mode; only a real pinch should zoom.
+        scaleDetector.isQuickScaleEnabled = !enabled
         selection = null
-        selectionBeforeTouch = null
-        selectionDragActive = false
-        selectionMoved = false
-        panActive = false
+        resetSelectionGesture()
         invalidate()
     }
 
@@ -561,22 +594,80 @@ class TerminalGridView @JvmOverloads constructor(
         return true
     }
 
+    private fun resetSelectionGesture() {
+        selectionAutoScroll.stop()
+        selectionBeforeTouch = null
+        selectionTouchAnchor = null
+        selectionDragActive = false
+        selectionMoved = false
+        selectionMultiTouch = false
+        panActive = false
+    }
+
+    private fun updateSelectionFocus() {
+        val anchor = selectionTouchAnchor ?: return
+        val focus = cellAtScreenPoint(lastTouchX, lastTouchY) ?: return
+        selection = TerminalSelection(anchor, focus)
+        invalidate()
+    }
+
+    private fun selectionEdgeX(): Int = TerminalSelectionAutoScroll.edgeDirection(lastTouchX, width.toFloat(), max(scaledCellWidth, (24f * resources.displayMetrics.density)))
+    private fun selectionEdgeY(): Int = TerminalSelectionAutoScroll.edgeDirection(lastTouchY, effectiveViewportHeightPx().toFloat(), max(scaledCellHeight, (24f * resources.displayMetrics.density)))
+
+    private fun updateSelectionAutoScroll() {
+        if (selectionMode && selectionDragActive && selectionMoved && selection != null &&
+            (selectionEdgeX() != 0 || selectionEdgeY() != 0)) {
+            selectionAutoScroll.start()
+        } else {
+            selectionAutoScroll.stop()
+        }
+    }
+
+    private fun scrollSelectionAtEdge(): Boolean {
+        if (!selectionMode || !selectionDragActive || !selectionMoved || selection == null) return false
+        val snap = snapshot ?: return false
+        val maxX = max(0f, snap.cols * scaledCellWidth - width)
+        val maxY = max(0f, snap.rows * scaledCellHeight - effectiveViewportHeightPx())
+        var x = selectionEdgeX()
+        var y = selectionEdgeY()
+        if ((x < 0 && cameraOffsetXPx <= 0f) || (x > 0 && cameraOffsetXPx >= maxX)) x = 0
+        if (y < 0 && cameraOffsetYPx <= 0f && (onScrollback == null || pendingScrollbackEntryRows > 0)) y = 0
+        if (y > 0 && cameraOffsetYPx >= maxY) y = 0
+        if (x == 0 && y == 0) return false
+        applyPanDelta(-x * scaledCellWidth, -y * scaledCellHeight)
+        updateSelectionFocus()
+        return true
+    }
+
     private fun onSelectionTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                resetSelectionGesture()
+                pendingScrollbackEntryRows = 0
+                pendingScrollbackEntryYPx = 0f
                 selectionBeforeTouch = selection
-                selectionDragActive = true
-                selectionMoved = false
-                cellAtScreenPoint(event.x, event.y)?.let { cell ->
-                    selection = TerminalSelection(cell, cell)
-                    invalidate()
-                }
+                selectionTouchAnchor = cellAtScreenPoint(event.x, event.y)
+                selectionDragActive = selectionTouchAnchor != null
+                // Preserve an existing range until a real one-finger drag starts.
+                if (selection == null) selectionTouchAnchor?.let { selection = TerminalSelection(it, it) }
+                selectionDownX = event.x
+                selectionDownY = event.y
                 lastTouchX = event.x
                 lastTouchY = event.y
+                restoredViewportState = null
+                restoredViewportFrameSeq = Long.MIN_VALUE
+                cameraMode = TerminalViewportMode.Manual
+                cursorFollowReturnMode = TerminalViewportMode.Manual
+                invalidate()
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                selection = selectionBeforeTouch
+                if (!selectionMultiTouch && !selectionMoved) selection = selectionBeforeTouch
+                // A second finger freezes the range just drawn, rather than
+                // rolling it back to the range from before this gesture.
+                selectionBeforeTouch = selection
+                selectionMultiTouch = true
                 selectionDragActive = false
+                selectionAutoScroll.stop()
                 panActive = true
                 cameraMode = TerminalViewportMode.Manual
                 cursorFollowReturnMode = TerminalViewportMode.Manual
@@ -585,47 +676,58 @@ class TerminalGridView @JvmOverloads constructor(
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
-                if (event.pointerCount >= 2) {
+                if (selectionMultiTouch && event.pointerCount >= 2) {
                     val x = pointerCenterX(event)
                     val y = pointerCenterY(event)
-                    applyPanDelta(x - lastTouchX, y - lastTouchY)
+                    if (!scaleDetector.isInProgress) applyPanDelta(x - lastTouchX, y - lastTouchY)
                     lastTouchX = x
                     lastTouchY = y
                 } else if (selectionDragActive) {
-                    cellAtScreenPoint(event.x, event.y)?.let { cell ->
-                        val anchor = selection?.anchor ?: cell
-                        if (cell != anchor) selectionMoved = true
-                        selection = TerminalSelection(anchor, cell)
-                        invalidate()
-                    }
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    if (!selectionMoved && (abs(event.x - selectionDownX) > selectionTouchSlop ||
+                        abs(event.y - selectionDownY) > selectionTouchSlop)) selectionMoved = true
+                    if (selectionMoved) updateSelectionFocus()
+                    updateSelectionAutoScroll()
                 }
             }
             MotionEvent.ACTION_POINTER_UP -> {
-                panActive = false
+                // Recenter on surviving fingers, avoiding a jump when one of
+                // three fingers lifts. The final finger never resumes selection.
+                panActive = event.pointerCount > 2
                 selectionDragActive = false
+                lastTouchX = pointerCenterX(event, event.actionIndex)
+                lastTouchY = pointerCenterY(event, event.actionIndex)
             }
             MotionEvent.ACTION_UP -> {
-                if (selectionDragActive && !selectionMoved) performClick()
-                panActive = false
-                selectionDragActive = false
-                selectionBeforeTouch = null
+                if (selectionDragActive) {
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    if (selectionMoved) updateSelectionFocus() else {
+                        val anchor = selectionTouchAnchor
+                        val focus = cellAtScreenPoint(event.x, event.y)
+                        if (anchor != null && focus != null) selection = TerminalSelection(anchor, focus)
+                        // Confirm a short, precise cell drag on lift, while a
+                        // held first finger remains harmless to an old range.
+                        if (anchor == focus) performClick()
+                    }
+                }
+                resetSelectionGesture()
             }
             MotionEvent.ACTION_CANCEL -> {
-                selection = selectionBeforeTouch
+                if (!selectionMultiTouch) selection = selectionBeforeTouch
+                resetSelectionGesture()
                 invalidate()
-                panActive = false
-                selectionDragActive = false
-                selectionBeforeTouch = null
             }
         }
         return true
     }
 
-    private fun pointerCenterX(event: MotionEvent): Float =
-        (0 until event.pointerCount).sumOf { event.getX(it).toDouble() }.toFloat() / event.pointerCount
+    private fun pointerCenterX(event: MotionEvent, excluded: Int = -1): Float =
+        (0 until event.pointerCount).filter { it != excluded }.map { event.getX(it) }.average().toFloat()
 
-    private fun pointerCenterY(event: MotionEvent): Float =
-        (0 until event.pointerCount).sumOf { event.getY(it).toDouble() }.toFloat() / event.pointerCount
+    private fun pointerCenterY(event: MotionEvent, excluded: Int = -1): Float =
+        (0 until event.pointerCount).filter { it != excluded }.map { event.getY(it) }.average().toFloat()
 
     private fun cellAtScreenPoint(x: Float, y: Float): TerminalCell? {
         val snap = snapshot ?: return null
@@ -702,7 +804,7 @@ class TerminalGridView @JvmOverloads constructor(
         if ((isLoading || scrollbackOffsetRows > 0) && cameraMode == TerminalViewportMode.CursorFollow) {
             cameraMode = cursorFollowReturnMode
         }
-        val suppressLiveAutoFollow = suppressLiveAutoFollowFrameSeq == frameSeq
+        val suppressLiveAutoFollow = suppressLiveAutoFollowFrameSeq == frameSeq || (selectionMode && selection != null)
         var inputFollowApplied = false
         if (snap.cursorVisible) {
             val cursorX = snap.cursorX.coerceIn(0, cols - 1)
@@ -913,6 +1015,18 @@ class TerminalGridView @JvmOverloads constructor(
         }
 
         canvas.restore()
+
+        // Paint in screen pixels: zoom must not thicken the history/live divider.
+        // Snap inward so a fractional row boundary never paints over live cells.
+        val historyBottomPx = scrollbackOffsetRows * scaledH - effectiveOffsetY
+        if (scrollbackOffsetRows in 1 until rows && historyBottomPx >= 1f && historyBottomPx <= viewportHeightPx) {
+            val top = floor(historyBottomPx) - 1f
+            bgPaint.color = ColorUtils.blendARGB(pal.defaultBg.toArgb(), pal.defaultFg.toArgb(), 0.65f)
+            // Eight-pixel dashes and four-pixel gaps stay fixed while zooming/panning.
+            for (left in 0 until width step 12) {
+                canvas.drawRect(left.toFloat(), top, minOf(left + 8, width).toFloat(), top + 1f, bgPaint)
+            }
+        }
     }
 
     private fun resolvePaint(mode: Int): TextPaint {
@@ -1183,6 +1297,7 @@ class TerminalGridView @JvmOverloads constructor(
     }
 
     private fun maybeAutoReenterLiveView() {
+        if (selectionMode && selection != null) return
         if (scrollbackOffsetRows <= 0 || scaledCellHeight <= 0f) return
         pendingScrollbackEntryRows = 0
         pendingScrollbackEntryYPx = 0f
@@ -1263,7 +1378,8 @@ class TerminalGridView @JvmOverloads constructor(
             onScrollback?.invoke(deltaRows)
             return
         }
-        if (scrollbackOffsetRows <= 0) return
+        // Keep loaded rows while selected text may lie above the viewport.
+        if (scrollbackOffsetRows <= 0 || (selectionMode && selection != null)) return
         scrollRemainderY += -overflowYPx
         val deltaRows = (scrollRemainderY / scaledCellHeight).toInt()
         if (deltaRows == 0) return

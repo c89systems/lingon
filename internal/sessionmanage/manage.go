@@ -2,6 +2,7 @@ package sessionmanage
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,13 +16,25 @@ type Request struct {
 	SessionID string `json:"session_id"`
 	Kind      string `json:"kind"`
 	Name      string `json:"name,omitempty"`
+	Path      string `json:"path,omitempty"`
+	// Cols and Rows optionally size a created session before its program starts.
+	Cols int `json:"cols,omitempty"`
+	Rows int `json:"rows,omitempty"`
 }
 
-// Result acknowledges readiness or a committed display-name change.
+// Result reports lifecycle readiness, a launch directory, or its immediate completions.
 type Result struct {
-	SessionID string `json:"session_id"`
-	Name      string `json:"name"`
-	Error     string `json:"error,omitempty"`
+	SessionID   string   `json:"session_id"`
+	Name        string   `json:"name"`
+	Error       string   `json:"error,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Directories []string `json:"directories,omitempty"`
+}
+
+// CreatedSessionID identifies the child allocated by an idempotent create request.
+func CreatedSessionID(req Request) string {
+	sum := sha256.Sum256([]byte(req.SessionID + "\x00" + req.RequestID))
+	return fmt.Sprintf("terminal-%x", sum[:12])
 }
 
 // Validate rejects malformed operations and terminal control characters in names.
@@ -29,16 +42,48 @@ func Validate(req Request) error {
 	if req.RequestID == "" || len(req.RequestID) > 128 || req.SessionID == "" || len(req.SessionID) > 256 {
 		return fmt.Errorf("request_id and session_id are required and must be bounded")
 	}
-	if req.Kind != "create" && req.Kind != "rename" {
+	if req.Kind != "create" && req.Kind != "rename" && req.Kind != "close" && req.Kind != "directory" && req.Kind != "chdir" {
 		return fmt.Errorf("unknown session operation")
+	}
+	if req.Cols < 0 || req.Rows < 0 || req.Cols > 65535 || req.Rows > 65535 || (req.Cols == 0) != (req.Rows == 0) {
+		return fmt.Errorf("creation geometry requires both columns and rows between 1 and 65535")
+	}
+	if req.Kind != "create" && (req.Cols != 0 || req.Rows != 0) {
+		return fmt.Errorf("only creation accepts terminal geometry")
+	}
+	if req.Kind == "directory" || req.Kind == "chdir" {
+		if req.Name != "" {
+			return fmt.Errorf("directory operations do not accept a name")
+		}
+		if req.Kind == "chdir" && req.Path == "" {
+			return fmt.Errorf("working directory is required")
+		}
+		return ValidatePath(req.Path)
+	}
+	if req.Path != "" {
+		return fmt.Errorf("only directory operations accept a path")
 	}
 	if req.Kind == "rename" {
 		return ValidateName(req.Name)
 	}
 	if req.Name != "" {
-		return fmt.Errorf("creation uses the host's default session name")
+		return fmt.Errorf("only rename accepts a session name")
 	}
 	return nil
+}
+
+// NormalizeName replaces spacing characters with underscores without hiding
+// invalid UTF-8 or terminal controls, which remain subject to validation.
+func NormalizeName(name string) string {
+	if !utf8.ValidString(name) {
+		return name
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) && !unicode.IsControl(r) {
+			return '_'
+		}
+		return r
+	}, name)
 }
 
 // ValidateName validates a user-visible session name, independent of its socket path.
@@ -47,8 +92,8 @@ func ValidateName(name string) error {
 		return fmt.Errorf("session name must contain 1–80 characters without surrounding whitespace")
 	}
 	for _, r := range name {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return fmt.Errorf("session name must not contain control characters")
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) {
+			return fmt.Errorf("session name must not contain whitespace or control characters")
 		}
 	}
 	return nil

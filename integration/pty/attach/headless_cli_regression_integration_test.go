@@ -638,15 +638,33 @@ func TestRealCLIRelayHeadlessDetachRemovesTerminatedSessionWithoutReconnectOverl
 	})
 }
 
-func TestRealCLILocalHeadlessDeadActiveSessionTabIsRemovedAndRemainingSessionStaysUsable(t *testing.T) {
+const localHandoffGrace = 5 * time.Second
+
+type localHandoffClock struct {
+	*clock.MockClock
+	watchGrace atomic.Bool
+	graceArmed chan struct{}
+}
+
+func (c *localHandoffClock) AfterFunc(delay time.Duration, fn func()) *clock.Timer {
+	timer := c.MockClock.AfterFunc(delay, fn)
+	if delay == localHandoffGrace && c.watchGrace.CompareAndSwap(true, false) {
+		close(c.graceArmed)
+	}
+	return timer
+}
+
+func TestMultiAttachLocalHeadlessDeadActiveSessionTabIsRemovedAndRemainingSessionStaysUsable(t *testing.T) {
 	if _, err := os.Stat("/bin/bash"); err != nil {
 		t.Skip("bash not available")
 	}
 
-	homeDir := shortHomeDir(t)
-	cfgDir := filepath.Join(homeDir, lingon.DefaultConfigDirName)
+	cfgDir := shortConfigDir(t)
 	const sessionA = "local-headless-survivor"
 	const sessionB = "local-headless-dead"
+	const survivorReady = "LOCAL_SURVIVOR_READY"
+	clk := &localHandoffClock{MockClock: clock.NewMock(), graceArmed: make(chan struct{})}
+	h := newHarness(t, ptytest.WithClock(clk))
 	stopB := startHeadlessDaemon(t, headlessDaemonSpec{
 		ConfigDir: cfgDir,
 		SessionID: sessionB,
@@ -659,49 +677,60 @@ func TestRealCLILocalHeadlessDeadActiveSessionTabIsRemovedAndRemainingSessionSta
 		}
 	})
 
-	waitUntilLocal(t, 8*time.Second, func() bool {
-		return localSessionCount(cfgDir) >= 1
+	events, stopWatcher := startHeadlessStateWatcher(t, t.Context(), cfgDir)
+	defer stopWatcher()
+	attach := h.StartMultiAttach(ptytest.MultiAttachOptions{
+		Endpoint:           "local://headless",
+		SessionID:          sessionB,
+		Cols:               40,
+		Rows:               10,
+		AllowOfflineToggle: true,
+		SessionSource:      localHeadlessSessionSource(cfgDir),
+		SocketResolver:     localHeadlessSocketResolver(cfgDir),
+		SessionEvents:      events,
 	})
-
-	attach := startLingonAttachHeadlessCLI(t, homeDir, sessionB, 40, 10)
 	defer attach.Cancel()
-	t.Cleanup(attach.Cancel)
+	waitScreen := func(phase string, check func(ptytest.Screen) bool) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		if err := attach.WaitForScreen(ctx, check); err != nil {
+			t.Fatalf("%s: %v\n%s", phase, err, attach.Screen().String())
+		}
+	}
 
-	waitForPromptVisible(t, attach, 8*time.Second)
+	waitScreen("active shell prompt", func(screen ptytest.Screen) bool { return screen.Contains("PROMPT>") })
 	stopA := startHeadlessDaemon(t, headlessDaemonSpec{
 		ConfigDir: cfgDir,
 		SessionID: sessionA,
-		Shell:     fixedPromptEmitRowsBash(t),
+		Shell:     markedHeadlessPromptShell(t, survivorReady),
 	})
 	t.Cleanup(stopA)
-	waitUntilLocal(t, 8*time.Second, func() bool {
-		return localSessionCount(cfgDir) >= 2
-	})
 
+	// The initial view has rendered a prompt, so its dial and readiness timers
+	// are already registered. Observe the missing-session timer before moving time.
+	clk.watchGrace.Store(true)
 	stopB()
 	stoppedB = true
-
-	waitUntilLocal(t, 8*time.Second, func() bool {
-		return localSessionIDsExact(cfgDir, []string{sessionA})
-	})
-	attach.Eventually(8*time.Second, 100*time.Millisecond, func(screen ptytest.Screen) error {
-		if screen.Contains("Not connected") || screen.Contains("reconnecting") {
-			return fmt.Errorf("stale disconnect overlay remained after local dead tab removal:\n%s", screen.String())
-		}
-		if strings.Contains(screen.Row(0), sessionB) {
-			return fmt.Errorf("dead local headless tab %q still present after grace: %q", sessionB, screen.Row(0))
-		}
-		if !screen.Contains("PROMPT>") {
-			return fmt.Errorf("surviving local headless session prompt missing after active session death:\n%s", screen.String())
-		}
-		return nil
-	})
-
-	const token = "LOCAL_HEADLESS_SURVIVOR_OK"
-	attach.Send("echo " + token + "\r")
-	if !screenContainsWithinRealTime(attach, token, 2*time.Second) {
-		t.Fatalf("surviving local headless tab did not remain interactive:\n%s", attach.Screen().String())
+	graceCtx, cancelGrace := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancelGrace()
+	select {
+	case <-clk.graceArmed:
+	case <-graceCtx.Done():
+		t.Fatalf("attach did not schedule missing-session grace: %v", graceCtx.Err())
 	}
+	clk.Add(localHandoffGrace)
+
+	waitScreen("surviving session after active session death", func(screen ptytest.Screen) bool {
+		return screen.Contains(survivorReady) && screen.Contains("PROMPT>") &&
+			!screen.Contains("Not connected") && !screen.Contains("reconnecting") &&
+			!strings.Contains(screen.Row(0), sessionB)
+	})
+
+	attach.Send("printf 'LOCAL_SURVIVOR_%s\\n' OK\r")
+	waitScreen("surviving shell command output", func(screen ptytest.Screen) bool {
+		return screen.Contains("LOCAL_SURVIVOR_OK")
+	})
 }
 
 func TestRealCLILocalHeadlessDetachRemovesTerminatedSessionWithoutReconnectOverlay(t *testing.T) {
